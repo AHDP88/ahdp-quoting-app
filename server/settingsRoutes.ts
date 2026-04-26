@@ -132,13 +132,42 @@ function detectColumnMapping(headers: string[]): Record<string, string> {
 
   map.itemCode   = find(["code", "sku", "item code", "itemcode", "product code"]);
   map.name       = find(["name", "description", "product name", "item name", "product"]);
-  map.sellRate   = find(["sell", "sell rate", "sell price", "price", "rate", "cost", "amount"]);
+  map.sellRate   = find(["customer sell", "customer price", "sell rate", "sell price", "sell", "price", "rate"]);
   map.unitCost   = find(["unit cost", "cost price", "supplier cost", "buy"]);
   map.unit       = find(["unit", "uom", "unit of"]);
   map.supplier   = find(["supplier", "vendor", "brand"]);
   map.category   = find(["category", "type", "section"]);
   map.notes      = find(["notes", "comments", "remarks"]);
   return map;
+}
+
+function isRiskySellRateHeader(header: string | undefined): boolean {
+  const normalized = header?.toLowerCase().trim() ?? "";
+  return normalized === "cost" || normalized === "amount" || normalized.includes("supplier cost") || normalized.includes("unit cost");
+}
+
+function getImportWarnings(headers: string[], mapping: Record<string, string>): string[] {
+  const warnings: string[] = [];
+  const normalizedHeaders = headers.map(header => header.toLowerCase().trim());
+
+  if (!mapping.itemCode) {
+    warnings.push("No itemCode column was detected. Rows without exact pricing_items.item_code matches will be skipped.");
+  }
+
+  if (!mapping.sellRate) {
+    warnings.push("No customer sell price column was detected. Include a column named sellRate, sell price, price, or rate.");
+  }
+
+  if (isRiskySellRateHeader(mapping.sellRate)) {
+    warnings.push(`The selected sellRate column "${mapping.sellRate}" looks like cost data. Imports update customer sell prices, not supplier costs.`);
+  }
+
+  const hasRiskyPriceColumn = normalizedHeaders.some(header => header === "cost" || header === "amount" || header.includes("supplier cost") || header.includes("unit cost"));
+  if (hasRiskyPriceColumn) {
+    warnings.push("The uploaded file contains cost/amount columns. Confirm the mapped sellRate column is the customer sell price before applying updates.");
+  }
+
+  return warnings;
 }
 
 export function registerSettingsRoutes(app: Express) {
@@ -301,24 +330,23 @@ export function registerSettingsRoutes(app: Express) {
       const headers = Object.keys(rows[0]);
       const autoMapping = detectColumnMapping(headers);
       const mapping = userMapping ?? autoMapping;
+      const warnings = getImportWarnings(headers, mapping);
+      if (rows.length > 100) {
+        warnings.push(`Preview is limited to the first 100 rows for safety. Split larger supplier files before importing.`);
+      }
 
-      // Preview: match each row against existing pricingItems
+      // Preview: only exact itemCode matches can update existing pricing_items.
       const preview = [];
       let matched = 0; let unmatched = 0;
 
-      for (const row of rows.slice(0, 500)) { // cap at 500 rows for preview
+      for (const row of rows.slice(0, 100)) { // keep preview small and safe
         const itemCode = mapping.itemCode ? row[mapping.itemCode]?.trim() : "";
         const name     = mapping.name     ? row[mapping.name]?.trim()     : "";
         const rateRaw  = mapping.sellRate ? row[mapping.sellRate]?.trim() : "";
         const rateNum  = parseFloat(rateRaw.replace(/[$,]/g, ""));
         const newRate  = isNaN(rateNum) ? null : Math.round(rateNum * 100);
 
-        // Try to match by itemCode first, then by name
-        let existing = itemCode ? await storage.getPricingItemByCode(itemCode) : undefined;
-        if (!existing && name) {
-          const all = await storage.getAllPricingItems({ search: name });
-          existing = all.find(i => i.name.toLowerCase() === name.toLowerCase());
-        }
+        const existing = itemCode ? await storage.getPricingItemByCode(itemCode) : undefined;
 
         const status = existing ? (newRate !== null && newRate !== existing.sellRate ? "update" : "no-change") : "unmatched";
         if (existing) matched++; else unmatched++;
@@ -332,6 +360,7 @@ export function registerSettingsRoutes(app: Express) {
           existingRate: existing?.sellRate ?? null,
           newRate,
           status,
+          skipReason: existing ? null : "Skipped: no exact itemCode match in pricing_items.",
           rawRow: row,
         });
       }
@@ -354,6 +383,7 @@ export function registerSettingsRoutes(app: Express) {
         headers,
         detectedMapping: autoMapping,
         columnMapping: mapping,
+        warnings,
         preview,
         stats: { total: rows.length, matched, unmatched },
       });

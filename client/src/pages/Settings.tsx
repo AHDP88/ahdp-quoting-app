@@ -361,6 +361,7 @@ interface PreviewRow {
   existingRate: number | null;
   newRate: number | null;
   status: "update" | "no-change" | "unmatched";
+  skipReason?: string | null;
   rawRow: Record<string, string>;
 }
 
@@ -369,6 +370,7 @@ interface UploadResult {
   headers: string[];
   detectedMapping: Record<string, string>;
   columnMapping: Record<string, string>;
+  warnings: string[];
   preview: PreviewRow[];
   stats: { total: number; matched: number; unmatched: number };
 }
@@ -462,7 +464,7 @@ function ImportTab() {
         <div className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Import Pricelist</h2>
-            <p className="text-sm text-gray-500">Upload a supplier CSV or Excel file to bulk-update sell rates.</p>
+            <p className="text-sm text-gray-500">Upload a supplier CSV or Excel file to safely update existing customer sell prices.</p>
           </div>
 
           <div>
@@ -495,8 +497,9 @@ function ImportTab() {
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-700 space-y-1">
             <p className="font-semibold">How it works</p>
             <p>1. Upload a supplier pricelist (any column order is fine — the app auto-detects Item Code, Name, Price columns).</p>
-            <p>2. Review matched and unmatched items before applying.</p>
-            <p>3. Apply only the rows you select. All changes are logged in the Changelog.</p>
+            <p>2. Rows update only when the file itemCode exactly matches an existing pricing_items item_code.</p>
+            <p>3. Unmatched rows are skipped. New pricing items are never created automatically.</p>
+            <p>4. Apply only selected customer sell price updates. Supplier costs should not be imported as sellRate.</p>
           </div>
         </div>
       )}
@@ -507,6 +510,9 @@ function ImportTab() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h2 className="text-lg font-semibold text-gray-800">Review Changes</h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Exact itemCode matches only. Unmatched rows are skipped and new pricing items are not created.
+              </p>
               <p className="text-sm text-gray-500">
                 {updateRows.length} prices will update · {noChangeRows.length} no change · {unmatchedRows.length} unmatched
               </p>
@@ -533,11 +539,27 @@ function ImportTab() {
             </span>
           </div>
 
+          {uploadResult.warnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-1">
+              <p className="font-semibold flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Import warnings</p>
+              {uploadResult.warnings.map((warning, index) => (
+                <p key={index}>{warning}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 space-y-1">
+            <p className="font-semibold text-gray-700">Safe import rules</p>
+            <p>Only exact itemCode matches can update existing pricing_items rows.</p>
+            <p>The imported sellRate is treated as the customer-facing sell price. Supplier costs are not applied here.</p>
+            <p>Rows without exact matches are skipped and will not create new pricing items.</p>
+          </div>
+
           {/* Updates table */}
           {updateRows.length > 0 && (
             <div className="rounded-xl border border-gray-200 overflow-hidden">
               <div className="bg-green-50 border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-green-800 uppercase tracking-wide">Price Updates ({updateRows.length})</span>
+                <span className="text-xs font-semibold text-green-800 uppercase tracking-wide">Customer Sell Price Updates ({updateRows.length})</span>
                 <div className="flex gap-2">
                   <button className="text-xs text-green-700 hover:underline" onClick={() => setSelectedRows(new Set(updateRows.map(r => r.rowIndex)))}>Select all</button>
                   <span className="text-green-300">|</span>
@@ -549,9 +571,9 @@ function ImportTab() {
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="py-2 px-3 text-left w-8"></th>
                     <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Matched Item</th>
-                    <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Current Rate</th>
+                    <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Current Sell Price</th>
                     <th className="py-2 px-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide"></th>
-                    <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">New Rate</th>
+                    <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">New Sell Price</th>
                     <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Change</th>
                   </tr>
                 </thead>
@@ -590,20 +612,21 @@ function ImportTab() {
             </div>
           )}
 
-          {/* Unmatched */}
+          {/* Skipped unmatched rows */}
           {unmatchedRows.length > 0 && (
             <details className="rounded-xl border border-amber-200 overflow-hidden">
               <summary className="bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800 uppercase tracking-wide cursor-pointer list-none flex items-center gap-2">
-                <AlertTriangle className="h-3.5 w-3.5" /> {unmatchedRows.length} unmatched rows (not in catalog)
+                <AlertTriangle className="h-3.5 w-3.5" /> {unmatchedRows.length} skipped rows (no exact itemCode match)
               </summary>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b bg-gray-50"><th className="py-2 px-3 text-left text-xs font-semibold text-gray-500">Code / Name</th><th className="py-2 px-3 text-left text-xs font-semibold text-gray-500">Rate in file</th></tr></thead>
+                  <thead><tr className="border-b bg-gray-50"><th className="py-2 px-3 text-left text-xs font-semibold text-gray-500">Code / Name</th><th className="py-2 px-3 text-left text-xs font-semibold text-gray-500">Sell price in file</th><th className="py-2 px-3 text-left text-xs font-semibold text-gray-500">Reason</th></tr></thead>
                   <tbody>
                     {unmatchedRows.map(r => (
                       <tr key={r.rowIndex} className="border-b border-gray-100">
                         <td className="py-2 px-3"><div className="text-sm text-gray-700">{r.name || r.itemCode}</div><div className="text-xs text-gray-400 font-mono">{r.itemCode}</div></td>
                         <td className="py-2 px-3 text-sm text-gray-500">{fmt(r.newRate)}</td>
+                        <td className="py-2 px-3 text-xs text-amber-700">{r.skipReason ?? "Skipped"}</td>
                       </tr>
                     ))}
                   </tbody>
