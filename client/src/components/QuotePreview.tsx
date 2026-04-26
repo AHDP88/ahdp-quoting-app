@@ -1,6 +1,6 @@
 import React from "react";
 import { QuoteData } from "@/components/QuoteBuilder";
-import { calculateQuoteTotal } from "@/lib/quoteCalculator";
+import type { QuoteCalculation } from "@/lib/quoteCalculation";
 import {
   buildScopeStatement,
   buildInclusionsChecklist,
@@ -19,6 +19,7 @@ interface QuotePreviewProps {
   onSave: () => void;
   onBack: () => void;
   isSaving: boolean;
+  calculation: QuoteCalculation;
 }
 
 const Spec = ({ label, value }: { label: string; value?: string | null }) =>
@@ -29,8 +30,7 @@ const Spec = ({ label, value }: { label: string; value?: string | null }) =>
     </div>
   ) : null;
 
-export default function QuotePreview({ quoteData, onSave, onBack, isSaving }: QuotePreviewProps) {
-  const calc = calculateQuoteTotal(quoteData);
+export default function QuotePreview({ quoteData, onSave, onBack, isSaving, calculation: calc }: QuotePreviewProps) {
   const scopeStatement = buildScopeStatement(quoteData);
   const inclusions = buildInclusionsChecklist(quoteData);
   const exclusions = buildExclusionsList(quoteData);
@@ -38,8 +38,9 @@ export default function QuotePreview({ quoteData, onSave, onBack, isSaving }: Qu
   const currentDate = new Date().toLocaleDateString("en-AU", { year: "numeric", month: "long", day: "numeric" });
   const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-AU", { year: "numeric", month: "long", day: "numeric" });
   const sections = ["Decking", "Verandah", "Screening", "Electrical", "Extras"];
-  const gst = calc.grandTotal * 0.1;
-  const incGST = calc.grandTotal * 1.1;
+  const subtotal = calc.totalAmount / 100;
+  const incGST = calc.totalAmountInc / 100;
+  const gst = incGST - subtotal;
 
   const projectLabel = quoteData.projectType
     .replace(/-/g, " + ")
@@ -79,7 +80,7 @@ export default function QuotePreview({ quoteData, onSave, onBack, isSaving }: Qu
                   {formatCurrency(incGST)}
                 </p>
                 <p className="text-white/50 text-xs mt-2">inc GST</p>
-                <p className="text-white/40 text-xs mt-0.5">{formatCurrency(calc.grandTotal)} ex GST</p>
+                <p className="text-white/40 text-xs mt-0.5">{formatCurrency(subtotal)} ex GST</p>
               </div>
             </div>
           </div>
@@ -116,7 +117,7 @@ export default function QuotePreview({ quoteData, onSave, onBack, isSaving }: Qu
         {/* GST breakdown strip */}
         <div className="grid grid-cols-3 divide-x divide-gray-100">
           {[
-            { label: "Subtotal (ex GST)", value: formatCurrency(calc.grandTotal) },
+            { label: "Subtotal (ex GST)", value: formatCurrency(subtotal) },
             { label: "GST (10%)", value: formatCurrency(gst) },
             { label: "Total (inc GST)", value: formatCurrency(incGST), highlight: true },
           ].map(({ label, value, highlight }) => (
@@ -260,7 +261,7 @@ export default function QuotePreview({ quoteData, onSave, onBack, isSaving }: Qu
             <tfoot>
               <tr className="border-t-2 border-gray-200">
                 <td colSpan={4} className="px-6 pt-4 pb-1 text-right text-sm text-gray-400 font-medium">Subtotal (ex GST)</td>
-                <td className="px-6 pt-4 pb-1 text-right text-sm font-bold text-gray-700">{formatCurrency(calc.grandTotal)}</td>
+                <td className="px-6 pt-4 pb-1 text-right text-sm font-bold text-gray-700">{formatCurrency(subtotal)}</td>
               </tr>
               <tr>
                 <td colSpan={4} className="px-6 pb-1 text-right text-sm text-gray-400">GST (10%)</td>

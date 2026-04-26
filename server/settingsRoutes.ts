@@ -3,7 +3,7 @@ import { storage } from "./storage";
 import { z } from "zod";
 import * as XLSX from "xlsx";
 
-// ── SEED DATA — all rates from ahdpPricing.ts converted to pricingItems ──────
+// ── SEED DATA — initial pricing_items catalog defaults ──────
 
 const SEED_ITEMS = [
   // === DECKING — MATERIAL RATES (per m²) ===

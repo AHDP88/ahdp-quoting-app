@@ -11,7 +11,7 @@ import QuotePreview from "@/components/QuotePreview";
 import QuoteSummary from "@/components/QuoteSummary";
 import ExtrasForm from "@/components/ExtrasForm";
 import { usePricing } from "@/hooks/usePricing";
-import { calculateQuoteTotal } from "@/lib/quoteCalculator";
+import { useQuoteCalculation } from "@/hooks/useQuoteCalculation";
 import { buildScopeStatement } from "@/lib/scopeSummary";
 
 export type ProjectType = "deck" | "pergola" | "deck-pergola" | "carport";
@@ -472,8 +472,6 @@ export default function QuoteBuilder() {
     clientPhone: string;
     siteAddress: string;
     notes: string;
-    totalAmount: number; // in cents, ex-GST
-    totalAmountInc: number; // in cents, inc-GST
     status: string;
     scopeSummaryText: string;
   }
@@ -517,18 +515,11 @@ export default function QuoteBuilder() {
   };
 
   const handleSaveQuote = () => {
-    // Calculate the accurate total using the new pricing engine
-    const calc = calculateQuoteTotal(quoteData);
-    // Store as integer cents to avoid floating-point issues
-    const totalAmountCents = Math.round(calc.grandTotal * 100);
-    const totalAmountIncCents = Math.round(calc.grandTotal * 1.1 * 100);
     const scopeText = buildScopeStatement(quoteData);
 
     // Convert numeric values to strings for database compatibility
     const formattedData: ApiQuoteData = {
       ...quoteData,
-      totalAmount: totalAmountCents,
-      totalAmountInc: totalAmountIncCents,
       status: "draft",
       scopeSummaryText: scopeText,
       // Convert all numeric fields to strings
@@ -563,8 +554,8 @@ export default function QuoteBuilder() {
     return materials.find(m => String(m.id) === String(quoteData.materialId)) || materials[0];
   };
 
-  const calc = calculateQuoteTotal(quoteData);
-  const incGST = calc.grandTotal * 1.1;
+  const { calculation: calc } = useQuoteCalculation(quoteData);
+  const incGST = calc.totalAmountInc / 100;
   const isLastStep = currentStep === 6;
 
   return (
@@ -626,6 +617,7 @@ export default function QuoteBuilder() {
                 onSave={handleSaveQuote}
                 onBack={handlePrevStep}
                 isSaving={saveQuoteMutation.isPending}
+                calculation={calc}
               />
             )}
           </div>
@@ -639,6 +631,7 @@ export default function QuoteBuilder() {
               isSaving={saveQuoteMutation.isPending}
               isLastStep={isLastStep}
               currentStep={currentStep}
+              calculation={calc}
             />
           </div>
         </div>

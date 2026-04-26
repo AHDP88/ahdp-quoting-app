@@ -1,17 +1,18 @@
 import React from "react";
 import { QuoteData } from "@/components/QuoteBuilder";
-import { calculateQuoteTotal } from "@/lib/quoteCalculator";
+import type { QuoteCalculation } from "@/lib/quoteCalculation";
 import { buildScopeStatement } from "@/lib/scopeSummary";
 import { formatCurrency } from "@/lib/utils";
 import { Loader2, Save, ChevronRight, Zap, CheckCircle2 } from "lucide-react";
 
 interface QuoteSummaryProps {
   quoteData: QuoteData;
-  material?: { id: string; name: string; price: number };
+  material?: { id: string | number; name: string; price: number };
   onSave: () => void;
   isSaving: boolean;
   isLastStep: boolean;
   currentStep: number;
+  calculation: QuoteCalculation;
 }
 
 const STEP_NEXT_LABELS: Record<number, string> = {
@@ -22,12 +23,12 @@ const STEP_NEXT_LABELS: Record<number, string> = {
   5: "Review & Generate Quote",
 };
 
-export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, currentStep }: QuoteSummaryProps) {
-  const calc = calculateQuoteTotal(quoteData);
+export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, currentStep, calculation: calc }: QuoteSummaryProps) {
   const deckArea = +(quoteData.length * quoteData.width).toFixed(2);
   const verandahArea = +(quoteData.roofSpan * quoteData.roofLength).toFixed(2);
-  const gst = calc.grandTotal * 0.1;
-  const incGST = calc.grandTotal * 1.1;
+  const subtotal = calc.totalAmount / 100;
+  const incGST = calc.totalAmountInc / 100;
+  const gst = incGST - subtotal;
   const hasAnyWork = calc.grandTotal > 0;
   const scopeStatement = buildScopeStatement(quoteData);
 
@@ -64,7 +65,7 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
               {formatCurrency(incGST)}
             </p>
             <div className="flex items-center gap-3 mt-2 text-[11px]">
-              <span className="text-white/50">{formatCurrency(calc.grandTotal)} ex GST</span>
+              <span className="text-white/50">{formatCurrency(subtotal)} ex GST</span>
               <span className="text-white/30">·</span>
               <span className="text-white/50">GST {formatCurrency(gst)}</span>
             </div>

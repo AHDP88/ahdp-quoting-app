@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { z } from "zod";
 import { insertQuoteSchema, insertMaterialSchema, insertAddonSchema, insertLabourRateSchema } from "@shared/schema";
 import { registerSettingsRoutes } from "./settingsRoutes";
+import { calculateQuoteTotals } from "./quoteCalculation";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ===== MATERIAL ROUTES =====
@@ -173,10 +174,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to delete labour rate" });
     }
   });
+  // Calculate quote totals from raw inputs. Pricing is resolved server-side from pricing_items.
+  app.post("/api/quotes/calculate", async (req, res) => {
+    try {
+      const calculation = await calculateQuoteTotals(req.body);
+      res.json(calculation);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to calculate quote" });
+    }
+  });
+
   // Create a new quote
   app.post("/api/quotes", async (req, res) => {
     try {
-      const quoteData = insertQuoteSchema.parse(req.body);
+      const calculation = await calculateQuoteTotals(req.body);
+      const quoteData = insertQuoteSchema.parse({
+        ...req.body,
+        totalAmount: calculation.totalAmount,
+        totalAmountInc: calculation.totalAmountInc,
+      });
       const quote = await storage.createQuote(quoteData);
 
       // Auto-generate and persist a human-readable quote reference (AHDP-YYYY-NNNN)
@@ -237,7 +253,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid quote ID" });
       }
 
-      const quoteData = insertQuoteSchema.parse(req.body);
+      const calculation = await calculateQuoteTotals(req.body);
+      const quoteData = insertQuoteSchema.parse({
+        ...req.body,
+        totalAmount: calculation.totalAmount,
+        totalAmountInc: calculation.totalAmountInc,
+      });
       const quote = await storage.updateQuote(id, quoteData);
       
       if (!quote) {
