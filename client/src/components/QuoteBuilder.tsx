@@ -40,32 +40,38 @@ export interface QuoteData {
   fasciaRequired: boolean;
   fasciaType: string;
   fasciaTypeOther: string;
+  fasciaLength: number | "";
   
   // Fixing & Ground
   fixingType: string;
   fixingTypeOther: string;
   groundType: string;
   postInstallation: string;
+  boltDownSystemType: string;
   
   // Dig Out
   digOutRequired: boolean;
-  digOutSize: number;
+  digOutSize: number | "";
+  machineHireRequired: string;
   
   // Steps/Ramps
   stepRampRequired: boolean;
   numberOfSteps: number;
-  stepHeight: number;
-  stepWidth: number;
-  stepLength: number;
+  stepHeight: number | "";
+  stepWidth: number | "";
+  stepLength: number | "";
   treadMaterial: string;
   handrailRequired: boolean;
   handrailType: string;
+  handrailLinealMetres: number | "";
+  handrailHeight: number | "";
   ballustradeType: string;
   
   // Deck Lights and Demo
   deckLights: boolean;
+  deckLightQty: number | "";
   demolitionRequired: boolean;
-  existingDeckSize: number;
+  existingDeckSize: number | "";
   
   // ********** Verandah Section **********
   verandahRequired: boolean;
@@ -179,9 +185,9 @@ export default function QuoteBuilder() {
     
     // Decking Section
     deckingRequired: true,
-    length: 4.5,
-    width: 3.2,
-    height: 0.8,
+    length: 0,
+    width: 0,
+    height: 0,
     joistSize: "",
     bearerSize: "",
     boardSize: "",
@@ -196,32 +202,38 @@ export default function QuoteBuilder() {
     fasciaRequired: false,
     fasciaType: "",
     fasciaTypeOther: "",
+    fasciaLength: "",
     
     // Fixing & Ground
     fixingType: "",
     fixingTypeOther: "",
     groundType: "",
     postInstallation: "",
+    boltDownSystemType: "",
     
     // Dig Out
     digOutRequired: false,
-    digOutSize: 0,
+    digOutSize: "",
+    machineHireRequired: "",
     
     // Steps/Ramps
     stepRampRequired: false,
     numberOfSteps: 0,
-    stepHeight: 0,
-    stepWidth: 0,
-    stepLength: 0,
+    stepHeight: "",
+    stepWidth: "",
+    stepLength: "",
     treadMaterial: "",
     handrailRequired: false,
     handrailType: "",
+    handrailLinealMetres: "",
+    handrailHeight: "",
     ballustradeType: "",
     
     // Deck Lights and Demo
     deckLights: false,
+    deckLightQty: "",
     demolitionRequired: false,
-    existingDeckSize: 0,
+    existingDeckSize: "",
     
     // Verandah Section
     verandahRequired: false,
@@ -352,10 +364,13 @@ export default function QuoteBuilder() {
     treadMaterial: string;
     handrailRequired: boolean;
     handrailType: string;
+    handrailLinealMetres: string;
+    handrailHeight: string;
     ballustradeType: string;
     
     // Deck Lights and Demo
     deckLights: boolean;
+    deckLightQty: string;
     demolitionRequired: boolean;
     existingDeckSize: string;
     
@@ -363,16 +378,19 @@ export default function QuoteBuilder() {
     fasciaRequired: boolean;
     fasciaType: string;
     fasciaTypeOther: string;
+    fasciaLength: string;
     
     // Fixing & Ground
     fixingType: string;
     fixingTypeOther: string;
     groundType: string;
     postInstallation: string;
+    boltDownSystemType: string;
     
     // Dig Out
     digOutRequired: boolean;
     digOutSize: string;
+    machineHireRequired: string;
     
     // Verandah Section
     verandahRequired: boolean;
@@ -527,10 +545,15 @@ export default function QuoteBuilder() {
       width: quoteData.width.toString(),
       height: quoteData.height.toString(),
       digOutSize: quoteData.digOutSize.toString(),
+      machineHireRequired: quoteData.machineHireRequired,
       stepHeight: quoteData.stepHeight.toString(),
       stepWidth: quoteData.stepWidth.toString(),
       stepLength: quoteData.stepLength.toString(),
+      handrailLinealMetres: quoteData.handrailLinealMetres.toString(),
+      handrailHeight: quoteData.handrailHeight.toString(),
+      deckLightQty: quoteData.deckLightQty.toString(),
       existingDeckSize: quoteData.existingDeckSize.toString(),
+      fasciaLength: quoteData.fasciaLength.toString(),
       roofSpan: quoteData.roofSpan.toString(),
       roofLength: quoteData.roofLength.toString(),
       roofPitch: quoteData.roofPitch.toString(),

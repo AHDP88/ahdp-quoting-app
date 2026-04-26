@@ -18,13 +18,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   structureTypeOptions,
   getBoardTypeOptions,
-  boardWidthOptions,
   fixingTypeOptions,
   deckingTypeOptions,
   fasciaRequiredOptions,
-  paintingOptions,
-  yesNoOptions,
-  mountTypeOptions
 } from "@/lib/dropdownOptions";
 
 interface DimensionsFormProps {
@@ -35,6 +31,9 @@ interface DimensionsFormProps {
 }
 
 export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: DimensionsFormProps) {
+  const numberValue = (value: number | "") => value === 0 || value === "" ? "" : value;
+  const parseOptionalNumber = (value: string) => value === "" ? "" : parseFloat(value);
+
   return (
     <div className="space-y-5 ds-reveal">
       <div className="space-y-5">
@@ -94,7 +93,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                       <Input
                         type="number"
                         id="length"
-                        value={quoteData.length}
+                        value={numberValue(quoteData.length)}
                         onChange={(e) => onUpdate({ length: parseFloat(e.target.value) || 0 })}
                         className="pr-12"
                         step="0.1"
@@ -114,7 +113,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                       <Input
                         type="number"
                         id="width"
-                        value={quoteData.width}
+                        value={numberValue(quoteData.width)}
                         onChange={(e) => onUpdate({ width: parseFloat(e.target.value) || 0 })}
                         className="pr-12"
                         step="0.1"
@@ -134,7 +133,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                       <Input
                         type="number"
                         id="height"
-                        value={quoteData.height}
+                        value={numberValue(quoteData.height)}
                         onChange={(e) => onUpdate({ height: parseFloat(e.target.value) || 0 })}
                         className="pr-12"
                         step="0.1"
@@ -351,7 +350,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                   <div className="sm:col-span-2">
                     <Select
                       value={quoteData.postInstallation}
-                      onValueChange={(value) => onUpdate({ postInstallation: value })}
+                      onValueChange={(value) => onUpdate({ postInstallation: value, boltDownSystemType: value === "Bolt Down" ? quoteData.boltDownSystemType : "" })}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select post installation" />
@@ -365,6 +364,27 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                     </Select>
                   </div>
                 </div>
+
+                {quoteData.postInstallation === "Bolt Down" && (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                    <label htmlFor="boltDownSystemType" className="text-sm font-medium text-gray-700">Bolt-down system type:</label>
+                    <div className="sm:col-span-2">
+                      <Select
+                        value={quoteData.boltDownSystemType}
+                        onValueChange={(value) => onUpdate({ boltDownSystemType: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select bolt-down system" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low-deck-bracket-shoe">Low deck bracket/shoe system</SelectItem>
+                          <SelectItem value="adjustable-boot-shoe">Adjustable boot/shoe system</SelectItem>
+                          <SelectItem value="low-deck-click-aluminium">Low deck click aluminium system</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="flex items-center justify-between">
                   <Label htmlFor="fasciaRequired" className="font-medium">Fascia/Screening Required?</Label>
@@ -376,33 +396,50 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                 </div>
                 
                 {quoteData.fasciaRequired && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center pl-4 border-l-2 border-gray-200">
-                    <label htmlFor="fasciaType" className="text-sm font-medium text-gray-700">Fascia Type:</label>
-                    <div className="sm:col-span-2">
-                      <Select
-                        value={quoteData.fasciaType}
-                        onValueChange={(value) => onUpdate({ fasciaType: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select fascia type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {fasciaRequiredOptions.map((option) => (
-                            <SelectItem key={option} value={option}>{option}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {quoteData.fasciaType === "Other" && (
-                        <div className="mt-2">
-                          <Input
-                            type="text"
-                            id="fasciaTypeOther"
-                            value={quoteData.fasciaTypeOther}
-                            onChange={(e) => onUpdate({ fasciaTypeOther: e.target.value })}
-                            placeholder="Please specify other fascia type"
-                          />
-                        </div>
-                      )}
+                  <div className="grid grid-cols-1 gap-4 pl-4 border-l-2 border-gray-200">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                      <label htmlFor="fasciaType" className="text-sm font-medium text-gray-700">Fascia Type:</label>
+                      <div className="sm:col-span-2">
+                        <Select
+                          value={quoteData.fasciaType}
+                          onValueChange={(value) => onUpdate({ fasciaType: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select fascia type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fasciaRequiredOptions.map((option) => (
+                              <SelectItem key={option} value={option}>{option}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {quoteData.fasciaType === "Other" && (
+                          <div className="mt-2">
+                            <Input
+                              type="text"
+                              id="fasciaTypeOther"
+                              value={quoteData.fasciaTypeOther}
+                              onChange={(e) => onUpdate({ fasciaTypeOther: e.target.value })}
+                              placeholder="Please specify other fascia type"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                      <label htmlFor="fasciaLength" className="text-sm font-medium text-gray-700">Fascia length (LM):</label>
+                      <div className="sm:col-span-2">
+                        <Input
+                          type="number"
+                          id="fasciaLength"
+                          value={numberValue(quoteData.fasciaLength)}
+                          onChange={(e) => onUpdate({ fasciaLength: parseOptionalNumber(e.target.value) })}
+                          step="0.1"
+                          min="0"
+                          placeholder="Leave blank to use exposed perimeter"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -424,8 +461,8 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <Input
                           type="number"
                           id="digOutSize"
-                          value={quoteData.digOutSize}
-                          onChange={(e) => onUpdate({ digOutSize: parseFloat(e.target.value) || 0 })}
+                          value={numberValue(quoteData.digOutSize)}
+                          onChange={(e) => onUpdate({ digOutSize: parseOptionalNumber(e.target.value) })}
                           className="pr-12"
                           step="0.1"
                           min="0"
@@ -434,6 +471,21 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                           <span className="h-full inline-flex items-center rounded-r-md border-l border-gray-300 bg-gray-50 px-3 text-gray-500 sm:text-sm">m²</span>
                         </div>
                       </div>
+                    </div>
+                    <label htmlFor="machineHireRequired" className="text-sm font-medium text-gray-700">Machine hire required?</label>
+                    <div className="sm:col-span-2">
+                      <Select
+                        value={quoteData.machineHireRequired}
+                        onValueChange={(value) => onUpdate({ machineHireRequired: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Yes or No" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="No">No</SelectItem>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 )}
@@ -469,11 +521,27 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                       <Switch 
                         id="deckLights" 
                         checked={quoteData.deckLights}
-                        onCheckedChange={(checked) => onUpdate({ deckLights: checked })}
+                        onCheckedChange={(checked) => onUpdate({ deckLights: checked, deckLightQty: checked ? quoteData.deckLightQty : "" })}
                       />
                     </div>
                   </div>
                 </div>
+
+                {quoteData.deckLights && (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center pl-4 border-l-2 border-gray-200">
+                    <label htmlFor="deckLightQty" className="text-sm font-medium text-gray-700">Deck light quantity:</label>
+                    <div className="sm:col-span-2">
+                      <Input
+                        type="number"
+                        id="deckLightQty"
+                        value={numberValue(quoteData.deckLightQty)}
+                        onChange={(e) => onUpdate({ deckLightQty: parseOptionalNumber(e.target.value) })}
+                        min="0"
+                        step="1"
+                      />
+                    </div>
+                  </div>
+                )}
                 
                 <div className="flex items-center justify-between pt-2">
                   <Label htmlFor="stepRampRequired" className="font-medium">Step/Ramp Required?</Label>
@@ -492,7 +560,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <Input
                           type="number"
                           id="numberOfSteps"
-                          value={quoteData.numberOfSteps}
+                          value={numberValue(quoteData.numberOfSteps)}
                           onChange={(e) => onUpdate({ numberOfSteps: parseInt(e.target.value) || 0 })}
                           min="0"
                           max="20"
@@ -506,8 +574,8 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <Input
                           type="number"
                           id="stepHeight"
-                          value={quoteData.stepHeight}
-                          onChange={(e) => onUpdate({ stepHeight: parseFloat(e.target.value) || 0 })}
+                          value={numberValue(quoteData.stepHeight)}
+                          onChange={(e) => onUpdate({ stepHeight: parseOptionalNumber(e.target.value) })}
                           min="0"
                         />
                       </div>
@@ -519,8 +587,8 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <Input
                           type="number"
                           id="stepWidth"
-                          value={quoteData.stepWidth}
-                          onChange={(e) => onUpdate({ stepWidth: parseFloat(e.target.value) || 0 })}
+                          value={numberValue(quoteData.stepWidth)}
+                          onChange={(e) => onUpdate({ stepWidth: parseOptionalNumber(e.target.value) })}
                           min="0"
                         />
                       </div>
@@ -532,8 +600,8 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <Input
                           type="number"
                           id="stepLength"
-                          value={quoteData.stepLength}
-                          onChange={(e) => onUpdate({ stepLength: parseFloat(e.target.value) || 0 })}
+                          value={numberValue(quoteData.stepLength)}
+                          onChange={(e) => onUpdate({ stepLength: parseOptionalNumber(e.target.value) })}
                           min="0"
                         />
                       </div>
@@ -595,6 +663,34 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                     </div>
                     
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                      <label htmlFor="handrailLinealMetres" className="text-sm font-medium text-gray-700">Handrail lineal metres required:</label>
+                      <div className="sm:col-span-2">
+                        <Input
+                          type="number"
+                          id="handrailLinealMetres"
+                          value={numberValue(quoteData.handrailLinealMetres)}
+                          onChange={(e) => onUpdate({ handrailLinealMetres: parseOptionalNumber(e.target.value) })}
+                          min="0"
+                          step="0.1"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                      <label htmlFor="handrailHeight" className="text-sm font-medium text-gray-700">Handrail height (mm):</label>
+                      <div className="sm:col-span-2">
+                        <Input
+                          type="number"
+                          id="handrailHeight"
+                          value={numberValue(quoteData.handrailHeight)}
+                          onChange={(e) => onUpdate({ handrailHeight: parseOptionalNumber(e.target.value) })}
+                          min="0"
+                          step="10"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
                       <label htmlFor="ballustradeType" className="text-sm font-medium text-gray-700">Balustrade Type:</label>
                       <div className="sm:col-span-2">
                         <Select
@@ -635,8 +731,8 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <Input
                           type="number"
                           id="existingDeckSize"
-                          value={quoteData.existingDeckSize}
-                          onChange={(e) => onUpdate({ existingDeckSize: parseFloat(e.target.value) || 0 })}
+                          value={numberValue(quoteData.existingDeckSize)}
+                          onChange={(e) => onUpdate({ existingDeckSize: parseOptionalNumber(e.target.value) })}
                           className="pr-12"
                           step="0.1"
                           min="0"

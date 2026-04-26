@@ -53,9 +53,24 @@ function asBoolean(value: unknown): boolean {
   return value === true || value === "true";
 }
 
+function normalizeKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 function lineItem(section: string, description: string, qty: number, unit: string, item: PricingItem): LineItem {
   const unitRate = dollarsFromCents(item.sellRate);
 
+  return {
+    section,
+    description,
+    qty,
+    unit,
+    unitRate,
+    total: +(qty * unitRate).toFixed(2),
+  };
+}
+
+function manualLineItem(section: string, description: string, qty: number, unit: string, unitRate: number): LineItem {
   return {
     section,
     description,
@@ -84,6 +99,40 @@ function getBoardKey(boardType: string): string {
     "FibreCement-HardieDeck": "inex",
   };
   return map[boardType] ?? "";
+}
+
+function getBoardWidthFactor(boardSize: string): number | undefined {
+  const width = parseInt(boardSize.split("x")[0], 10);
+  if (!Number.isFinite(width)) return undefined;
+  if (width <= 90) return 1.05;
+  if (width >= 135 && width <= 145) return 1;
+  return undefined;
+}
+
+function getFixingCode(fixingType: string): string | undefined {
+  const normalized = normalizeKey(fixingType);
+  if (normalized.includes("facescrewed") || normalized.includes("facescrew")) return "deck.fixing.faceScrews";
+  if (normalized.includes("hidden")) return "deck.fixing.hiddenFasteners";
+  if (normalized.includes("joiststrip")) return "deck.fixing.joistStrips";
+  return undefined;
+}
+
+function getBoltDownSystemCode(systemType: string): string | undefined {
+  const normalized = normalizeKey(systemType);
+  if (normalized.includes("lowdeckbracket") || normalized.includes("bracketshoe")) return "deck.post.boltDown.lowDeckBracketShoe";
+  if (normalized.includes("adjustable")) return "deck.post.boltDown.adjustableBootShoe";
+  if (normalized.includes("click") || normalized.includes("aluminium")) return "deck.post.boltDown.lowDeckClickAluminium";
+  return undefined;
+}
+
+function getFasciaCode(fasciaType: string): string | undefined {
+  const normalized = normalizeKey(fasciaType);
+  if (normalized.includes("deckingboards")) return "deck.fascia.deckingBoards";
+  if (normalized.includes("timberfascia")) return "deck.fascia.timber";
+  if (normalized.includes("fcsheet")) return "deck.fascia.fcSheet";
+  if (normalized.includes("cgisheet")) return "deck.fascia.cgiSheet";
+  if (normalized === "no") return undefined;
+  return undefined;
 }
 
 function getDeckLabourKey(boardKey: string): string {
@@ -181,6 +230,10 @@ function addPricedLineItem(prices: PricingMap, items: LineItem[], input: PricedL
   items.push(lineItem(input.section, input.description, input.qty, input.unit, item));
 }
 
+function addPricedOrWarning(prices: PricingMap, items: LineItem[], input: PricedLineInput) {
+  addPricedLineItem(prices, items, input);
+}
+
 async function getPricingMap(): Promise<PricingMap> {
   const pricing = await storage.getAllPricingItems({ isActive: true });
   return new Map(
@@ -200,28 +253,85 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
     const width = asNumber(rawQuote.width);
     const height = asNumber(rawQuote.height);
     const area = +(length * width).toFixed(2);
-    const boardKey = getBoardKey(asString(rawQuote.boardType) || asString(rawQuote.deckingType));
+    const boardType = asString(rawQuote.boardType) || asString(rawQuote.deckingType);
+    const boardSize = asString(rawQuote.boardSize) || asString(rawQuote.customBoardSize);
+    const boardKey = getBoardKey(boardType);
     const sizeBand = getSizeBandCode(area, ["under45", "45to65", "over65"]);
     const labourKey = getDeckLabourKey(boardKey);
+    const boardWidthFactor = getBoardWidthFactor(boardSize);
 
-    addPricedLineItem(prices, items, {
-      section: "Decking",
-      description: "Decking boards (materials)",
-      qty: area,
-      unit: "m2",
-      itemCode: boardKey ? `deck.mat.${boardKey}.${sizeBand}` : undefined,
-      warnings,
-      missingLabel: `decking material (${asString(rawQuote.boardType) || asString(rawQuote.deckingType) || "unspecified board"})`,
-    });
-    addPricedLineItem(prices, items, {
-      section: "Decking",
-      description: "Carpenter - deck installation",
-      qty: area,
-      unit: "m2",
-      itemCode: labourKey ? `deck.labour.carpenter.${labourKey}` : undefined,
-      warnings,
-      missingLabel: `decking labour (${asString(rawQuote.boardType) || asString(rawQuote.deckingType) || "unspecified board"})`,
-    });
+    if (!boardType) warnings.push("Decking board type is required before decking can be priced.");
+    if (!boardSize) warnings.push("Decking board width/size is required before decking can be priced.");
+    if (boardType.includes("Kapur") || boardType.includes("Jarrah")) warnings.push(`No pricing item mapping configured for decking material (${boardType}). Seed a matching pricing_items code before using this board.`);
+    if (boardType.includes("Trex") || boardType.includes("Millboard") || boardType.includes("Ecodeck")) warnings.push(`No pricing item mapping configured for composite decking material (${boardType}). Seed a matching pricing_items code before using this board.`);
+    if (boardType.includes("Aluminium")) warnings.push(`Aluminium decking is not currently priced. Remove it from the quote or seed a pricing_items entry before using ${boardType}.`);
+    if (boardType.includes("HardieDeck") || boardKey === "inex") warnings.push("HardieDeck currently maps to INEX fibre cement pricing. Review this business mapping/rate before relying on it.");
+    if (boardSize && boardWidthFactor === undefined) warnings.push(`No board-width pricing rule configured for board size ${boardSize}.`);
+
+    if (boardType && boardSize && boardKey && boardWidthFactor !== undefined) {
+      addPricedLineItem(prices, items, {
+        section: "Decking",
+        description: `Decking boards (materials, ${boardSize})`,
+        qty: +(area * boardWidthFactor).toFixed(2),
+        unit: "m2",
+        itemCode: `deck.mat.${boardKey}.${sizeBand}`,
+        warnings,
+        missingLabel: `decking material (${boardType})`,
+      });
+      addPricedLineItem(prices, items, {
+        section: "Decking",
+        description: "Carpenter - deck installation",
+        qty: area,
+        unit: "m2",
+        itemCode: labourKey ? `deck.labour.carpenter.${labourKey}` : undefined,
+        warnings,
+        missingLabel: `decking labour (${boardType})`,
+      });
+    }
+
+    if (asString(rawQuote.joistSize)) {
+      addPricedOrWarning(prices, items, { section: "Decking", description: `Joists - ${asString(rawQuote.joistSize)}`, qty: area, unit: "m2", itemCode: `deck.frame.joist.${asString(rawQuote.joistSize)}`, warnings, missingLabel: `joist size ${asString(rawQuote.joistSize)}` });
+    }
+
+    if (asString(rawQuote.bearerSize)) {
+      addPricedOrWarning(prices, items, { section: "Decking", description: `Bearers - ${asString(rawQuote.bearerSize)}`, qty: area, unit: "m2", itemCode: `deck.frame.bearer.${asString(rawQuote.bearerSize)}`, warnings, missingLabel: `bearer size ${asString(rawQuote.bearerSize)}` });
+    }
+
+    if (asString(rawQuote.fixingType)) {
+      addPricedOrWarning(prices, items, { section: "Decking", description: `Fixings - ${asString(rawQuote.fixingType)}`, qty: area, unit: "m2", itemCode: getFixingCode(asString(rawQuote.fixingType)), warnings, missingLabel: `fixing type ${asString(rawQuote.fixingType)}` });
+    }
+
+    if (asString(rawQuote.postInstallation) === "Bolt Down") {
+      const systemType = asString(rawQuote.boltDownSystemType);
+      addPricedOrWarning(prices, items, { section: "Decking", description: `Bolt-down system - ${systemType || "not selected"}`, qty: area, unit: "m2", itemCode: getBoltDownSystemCode(systemType), warnings, missingLabel: `bolt-down system ${systemType || "not selected"}` });
+    }
+
+    if (asBoolean(rawQuote.fasciaRequired)) {
+      const fasciaType = asString(rawQuote.fasciaType);
+      const fasciaLength = asNumber(rawQuote.fasciaLength) > 0 ? asNumber(rawQuote.fasciaLength) : +(2 * (length + width)).toFixed(2);
+      const fasciaArea = +(Math.max(height, 0) * fasciaLength).toFixed(2);
+      if (!fasciaType || fasciaType === "No") {
+        warnings.push("Fascia is marked required but no priced fascia type was selected.");
+      } else if (fasciaArea <= 0) {
+        warnings.push("Fascia pricing requires deck height and fascia length/exposed perimeter.");
+      } else {
+        addPricedOrWarning(prices, items, { section: "Decking", description: `Fascia - ${fasciaType}`, qty: fasciaArea, unit: "m2", itemCode: getFasciaCode(fasciaType), warnings, missingLabel: `fascia type ${fasciaType}` });
+      }
+    }
+
+    if (asBoolean(rawQuote.subframePainted)) {
+      items.push(manualLineItem("Decking", "Subframe painted", area, "m2", 25));
+    }
+
+    if (asBoolean(rawQuote.joistProtectionTape)) {
+      const tapeItem = pricingItem(prices, "deck.extra.joistProtectionTape", [], "joist protection tape");
+      if (tapeItem) {
+        items.push(lineItem("Decking", "Joist protection tape", area, "roll", tapeItem));
+      } else {
+        items.push(manualLineItem("Decking", "Joist protection tape allowance", area, "roll", 55));
+        warnings.push("Using temporary joist protection tape allowance of 1 roll per m2 at $55 because pricing_items code deck.extra.joistProtectionTape is missing.");
+      }
+    }
 
     if (height > 1.2) {
       addPricedLineItem(prices, items, { section: "Decking", description: "Height surcharge >1200mm", qty: area, unit: "m2", itemCode: "deck.extra.height1200", warnings, missingLabel: "deck height surcharge >1200mm" });
@@ -238,27 +348,41 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
     }
 
     if (asBoolean(rawQuote.stepRampRequired) && asNumber(rawQuote.stepLength) > 0 && asNumber(rawQuote.stepWidth) > 0) {
-      const stepArea = +(asNumber(rawQuote.stepLength) * asNumber(rawQuote.stepWidth)).toFixed(2);
-      addPricedLineItem(prices, items, { section: "Decking", description: "Steps/Ramp - boxed/tread (carpenter)", qty: stepArea, unit: "m2", itemCode: "deck.labour.stairs", warnings, missingLabel: "deck stairs" });
+      const numberOfSteps = Math.max(asNumber(rawQuote.numberOfSteps), 1);
+      const stepWidthM = asNumber(rawQuote.stepWidth) / 1000;
+      const stepLengthM = asNumber(rawQuote.stepLength) / 1000;
+      const stepArea = +(stepWidthM * stepLengthM * numberOfSteps).toFixed(2);
+      if (stepArea > 40 || stepWidthM > 5 || stepLengthM > 5) {
+        warnings.push("Step dimensions look too large. Enter step width/length in millimetres; step pricing was skipped to prevent an absurd total.");
+      } else {
+        addPricedLineItem(prices, items, { section: "Decking", description: "Steps/Ramp - boxed/tread (carpenter)", qty: stepArea, unit: "m2", itemCode: "deck.labour.stairs", warnings, missingLabel: "deck stairs" });
+      }
     }
 
     if (asBoolean(rawQuote.handrailRequired)) {
-      const perim = +(2 * (length + width)).toFixed(2);
+      const linealMetres = asNumber(rawQuote.handrailLinealMetres);
       const handrailType = asString(rawQuote.handrailType).toLowerCase();
       const code = handrailType.includes("spotted") ? "deck.extra.handrailSpGum" : "deck.extra.handrailMerbau";
-      addPricedLineItem(prices, items, { section: "Decking", description: `Handrail - ${asString(rawQuote.handrailType) || "Merbau"}`, qty: perim, unit: "LM", itemCode: code, warnings, missingLabel: "deck handrail" });
+      if (linealMetres <= 0) {
+        warnings.push("Handrail pricing requires handrail lineal metres. It no longer guesses from deck perimeter.");
+      } else {
+        addPricedLineItem(prices, items, { section: "Decking", description: `Handrail - ${asString(rawQuote.handrailType) || "Merbau"}`, qty: linealMetres, unit: "LM", itemCode: code, warnings, missingLabel: "deck handrail" });
+      }
     }
 
     const balustradeType = asString(rawQuote.ballustradeType);
     if (balustradeType) {
-      const perim = +(2 * (length + width)).toFixed(2);
+      const perim = asNumber(rawQuote.handrailLinealMetres);
       const code = balustradeType === "Timber" ? "deck.extra.balustTimber" : "deck.extra.balustSS";
-      addPricedLineItem(prices, items, { section: "Decking", description: `Balustrade - ${balustradeType}`, qty: perim, unit: "LM", itemCode: code, warnings, missingLabel: `deck balustrade (${balustradeType})` });
+      if (perim > 0) addPricedLineItem(prices, items, { section: "Decking", description: `Balustrade - ${balustradeType}`, qty: perim, unit: "LM", itemCode: code, warnings, missingLabel: `deck balustrade (${balustradeType})` });
     }
 
     if (asBoolean(rawQuote.digOutRequired) && asNumber(rawQuote.digOutSize) > 0) {
       addPricedLineItem(prices, items, { section: "Decking", description: "Dingo dig to 300mm", qty: asNumber(rawQuote.digOutSize), unit: "m2", itemCode: "deck.extra.dingo", warnings, missingLabel: "deck dig out" });
       addPricedLineItem(prices, items, { section: "Decking", description: "Soil bin (per bin)", qty: 1, unit: "bin", itemCode: "deck.extra.soilBin", warnings, missingLabel: "soil bin" });
+    }
+    if (asString(rawQuote.machineHireRequired) === "Yes") {
+      addPricedOrWarning(prices, items, { section: "Decking", description: "Machine hire", qty: 1, unit: "job", itemCode: "deck.extra.machineHire", warnings, missingLabel: "machine hire" });
     }
   }
 
@@ -349,9 +473,15 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
       addPricedLineItem(prices, items, { section: "Electrical", description: "Twin exterior GPO", qty: gpoCount, unit: "each", itemCode: "elec.gpo.supply", warnings, missingLabel: "GPO supply" });
       addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - GPO installation", qty: gpoCount, unit: "each", itemCode: "elec.gpo.labour", warnings, missingLabel: "GPO installation" });
     }
-    if (asBoolean(rawQuote.deckLights)) {
-      addPricedLineItem(prices, items, { section: "Electrical", description: "Deck lights (warm white 30mm)", qty: 8, unit: "each", itemCode: "elec.deckLight.warmWhite", warnings, missingLabel: "deck lights supply" });
-      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - deck light install", qty: 8, unit: "each", itemCode: "elec.deckLight.labour", warnings, missingLabel: "deck lights installation" });
+  }
+
+  if (asBoolean(rawQuote.deckLights)) {
+    const deckLightQty = asNumber(rawQuote.deckLightQty);
+    if (deckLightQty <= 0) {
+      warnings.push("Deck lights are selected but no deck light quantity was entered.");
+    } else {
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Deck lights (warm white 30mm)", qty: deckLightQty, unit: "each", itemCode: "elec.deckLight.warmWhite", warnings, missingLabel: "deck lights supply" });
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - deck light install", qty: deckLightQty, unit: "each", itemCode: "elec.deckLight.labour", warnings, missingLabel: "deck lights installation" });
     }
   }
 

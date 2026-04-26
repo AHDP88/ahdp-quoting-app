@@ -261,7 +261,6 @@ export const deckingTypeOptions = [
   "Timber",
   "Composite",
   "Fibre Cement",
-  "Aluminium",
   "Other"
 ];
 
@@ -291,8 +290,7 @@ export const compositeBoardTypeOptions = [
 ];
 
 export const otherBoardTypeOptions = [
-  "FibreCement-HardieDeck",
-  "Aluminium-DecoSlat"
+  "FibreCement-HardieDeck"
 ];
 
 // This function returns the appropriate board type options based on decking type
@@ -346,9 +344,10 @@ export const fixingTypeOptions = [
 ];
 
 export const fasciaRequiredOptions = [
-  "Yes - Decking Boards",
-  "Yes - Timber Fascia",
-  "Yes - Cladding",
+  "Decking boards",
+  "Timber fascia",
+  "FC sheet",
+  "CGI sheet",
   "No",
   "Other"
 ];
