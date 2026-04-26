@@ -41,6 +41,7 @@ export default function QuotePreview({ quoteData, onSave, onBack, isSaving, calc
   const subtotal = calc.totalAmount / 100;
   const incGST = calc.totalAmountInc / 100;
   const gst = incGST - subtotal;
+  const hasPricingWarnings = calc.warnings.length > 0;
 
   const projectLabel = quoteData.projectType
     .replace(/-/g, " + ")
@@ -128,6 +129,27 @@ export default function QuotePreview({ quoteData, onSave, onBack, isSaving, calc
           ))}
         </div>
       </div>
+
+      {hasPricingWarnings && (
+        <div className="ds-card border-amber-200 bg-amber-50 px-6 py-5">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-amber-100 text-amber-700">
+              <AlertTriangle className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-semibold text-amber-900 text-sm">Pricing Warnings</h2>
+              <p className="text-xs text-amber-700 mt-0.5 mb-2">Review these missing pricing mappings before saving this quote.</p>
+              <ul className="space-y-1.5">
+                {calc.warnings.map((warning, index) => (
+                  <li key={index} className="text-sm text-amber-800 leading-relaxed">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Project Scope ── */}
       {scopeStatement && (

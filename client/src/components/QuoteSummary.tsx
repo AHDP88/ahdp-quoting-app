@@ -3,7 +3,7 @@ import { QuoteData } from "@/components/QuoteBuilder";
 import type { QuoteCalculation } from "@/lib/quoteCalculation";
 import { buildScopeStatement } from "@/lib/scopeSummary";
 import { formatCurrency } from "@/lib/utils";
-import { Loader2, Save, ChevronRight, Zap, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, Loader2, Save, ChevronRight } from "lucide-react";
 
 interface QuoteSummaryProps {
   quoteData: QuoteData;
@@ -30,6 +30,7 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
   const incGST = calc.totalAmountInc / 100;
   const gst = incGST - subtotal;
   const hasAnyWork = calc.grandTotal > 0;
+  const hasPricingWarnings = calc.warnings.length > 0;
   const scopeStatement = buildScopeStatement(quoteData);
 
   const nextLabel = isLastStep ? "Save Quote" : STEP_NEXT_LABELS[currentStep] ?? "Next Step";
@@ -140,6 +141,24 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
             <div className="pt-2 mt-1 border-t border-gray-100 flex items-center justify-between">
               <span className="text-sm font-semibold text-gray-800">Total (inc GST)</span>
               <span className="text-base font-bold text-[#1f3d2b]">{formatCurrency(incGST)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasPricingWarnings && (
+        <div className="px-5 py-4 border-b border-amber-100 bg-amber-50">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider mb-1">Pricing Warnings</p>
+              <ul className="space-y-1">
+                {calc.warnings.map((warning, index) => (
+                  <li key={index} className="text-[11px] leading-relaxed text-amber-800">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>

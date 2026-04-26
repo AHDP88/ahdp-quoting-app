@@ -103,6 +103,7 @@ function getScreenMaterialCode(material: string): string | undefined {
   const normalized = material.toLowerCase();
   if (normalized.includes("pine")) return "screen.mat.treatedPine.single";
   if (normalized.includes("fc") || normalized.includes("cfc")) return "screen.mat.fc.single";
+  if (normalized.includes("rendered blueboard")) return "screen.mat.fc.single";
   if (normalized.includes("colorbond")) return "screen.mat.colorbond.single";
   if (normalized.includes("aluminium")) return "screen.mat.aluminium.single";
   if (normalized.includes("merbau")) return "screen.mat.merbauH.single";
