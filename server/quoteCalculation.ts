@@ -26,6 +26,16 @@ export interface QuoteCalculation {
 type RawQuoteInput = Record<string, unknown>;
 type PricingMap = Map<string, PricingItem>;
 
+interface PricedLineInput {
+  section: string;
+  description: string;
+  qty: number;
+  unit: string;
+  itemCode: string | undefined;
+  warnings: string[];
+  missingLabel: string;
+}
+
 function asNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
@@ -43,7 +53,9 @@ function asBoolean(value: unknown): boolean {
   return value === true || value === "true";
 }
 
-function lineItem(section: string, description: string, qty: number, unit: string, unitRate: number): LineItem {
+function lineItem(section: string, description: string, qty: number, unit: string, item: PricingItem): LineItem {
+  const unitRate = dollarsFromCents(item.sellRate);
+
   return {
     section,
     description,
@@ -52,18 +64,6 @@ function lineItem(section: string, description: string, qty: number, unit: strin
     unitRate,
     total: +(qty * unitRate).toFixed(2),
   };
-}
-
-function getDeckSizeBand(area: number): "under45" | "45to65" | "over65" {
-  if (area < 45) return "under45";
-  if (area <= 65) return "45to65";
-  return "over65";
-}
-
-function getVerandahSizeBand(area: number): "under40" | "40to65" | "over65" {
-  if (area < 40) return "under40";
-  if (area <= 65) return "40to65";
-  return "over65";
 }
 
 function getSteelVerandahBand(area: number): "under24" | "24to40" | "40to65" | "over65" {
@@ -76,24 +76,40 @@ function getSteelVerandahBand(area: number): "under24" | "24to40" | "40to65" | "
 function getBoardKey(boardType: string): string {
   const map: Record<string, string> = {
     "Timber-Pine": "clearPine",
-    "Timber-Kapur": "clearPine",
     "Timber-Merbau": "merbau",
     "Timber-Spotted Gum": "spottedGum",
-    "Timber-Jarrah": "spottedGum",
     "Timber-Blackbutt": "blackbutt",
-    "Timber-White Mahogany": "blackbutt",
     "Composite-Modwood": "modwood",
     "Composite-Evalast": "evalast",
-    "Composite-Trex": "modwood",
-    "Composite-Millboard": "modwood",
-    "Composite-Ecodeck": "modwood",
     "FibreCement-HardieDeck": "inex",
-    "Aluminium-DecoSlat": "modwood",
   };
-  return map[boardType] ?? "merbau";
+  return map[boardType] ?? "";
 }
 
-function getTimberVerRate(structureStyle: string, roofType: string, roofSpan: number): string {
+function getDeckLabourKey(boardKey: string): string {
+  const map: Record<string, string> = {
+    clearPine: "pine",
+    merbau: "merbau",
+    spottedGum: "merbau",
+    blackbutt: "merbau",
+    modwood: "merbau",
+    evalast: "evalast",
+    inex: "inex",
+  };
+  return map[boardKey] ?? "";
+}
+
+function getScreenMaterialCode(material: string): string | undefined {
+  const normalized = material.toLowerCase();
+  if (normalized.includes("pine")) return "screen.mat.treatedPine.single";
+  if (normalized.includes("fc") || normalized.includes("cfc")) return "screen.mat.fc.single";
+  if (normalized.includes("colorbond")) return "screen.mat.colorbond.single";
+  if (normalized.includes("aluminium")) return "screen.mat.aluminium.single";
+  if (normalized.includes("merbau")) return "screen.mat.merbauH.single";
+  return undefined;
+}
+
+function getTimberVerRate(structureStyle: string, roofType: string): string {
   const style = structureStyle.toLowerCase();
   const roof = roofType.toLowerCase();
 
@@ -104,8 +120,7 @@ function getTimberVerRate(structureStyle: string, roofType: string, roofSpan: nu
   }
   if (style.includes("flat") || style.includes("skillion") || style.includes("fly")) {
     if (roof.includes("insulated") || roof.includes("solarspan")) return "flatSolarspan";
-    if (roof.includes("cgi")) return "cgiFlatStd";
-    return roofSpan > 4 ? "cgiFlatStd" : "cgiFlatStd";
+    return "cgiFlatStd";
   }
   return "cgiFlatStd";
 }
@@ -120,24 +135,49 @@ function getTimberCarpenterRating(rateKey: string): number {
   return ratings[rateKey] ?? 5;
 }
 
-function dollarsFromCents(cents: number | null): number {
-  return (cents ?? 0) / 100;
+function getSizeBandCode(area: number, bands: string[]): string {
+  if (bands.length === 2) return area < 45 ? bands[0] : bands[1];
+  if (bands.length === 3) {
+    if (bands[0].startsWith("under40")) {
+      if (area < 40) return bands[0];
+      if (area <= 65) return bands[1];
+      return bands[2];
+    }
+    if (area < 45) return bands[0];
+    if (area <= 65) return bands[1];
+    return bands[2];
+  }
+  return "";
 }
 
-function rate(
-  prices: PricingMap,
-  codes: string[],
-  warnings: string[],
-  description: string,
-): number {
-  for (const code of codes) {
-    const item = prices.get(code);
-    if (item?.isActive !== false && item?.sellRate !== null && item?.sellRate !== undefined) {
-      return dollarsFromCents(item.sellRate);
-    }
+function dollarsFromCents(cents: number): number {
+  return cents / 100;
+}
+
+function pricingItem(prices: PricingMap, itemCode: string | undefined, warnings: string[], missingLabel: string): PricingItem | undefined {
+  if (!itemCode) {
+    warnings.push(`No pricing item mapping configured for ${missingLabel}`);
+    return undefined;
   }
-  warnings.push(`Missing active pricing item for ${description}: ${codes.join(", ")}`);
-  return 0;
+
+  const item = prices.get(itemCode);
+  if (!item) {
+    warnings.push(`Missing active pricing item for ${missingLabel}: ${itemCode}`);
+    return undefined;
+  }
+
+  if (item.sellRate === null || item.sellRate === undefined) {
+    warnings.push(`Pricing item is missing sellRate for ${missingLabel}: ${itemCode}`);
+    return undefined;
+  }
+
+  return item;
+}
+
+function addPricedLineItem(prices: PricingMap, items: LineItem[], input: PricedLineInput) {
+  const item = pricingItem(prices, input.itemCode, input.warnings, input.missingLabel);
+  if (!item) return;
+  items.push(lineItem(input.section, input.description, input.qty, input.unit, item));
 }
 
 async function getPricingMap(): Promise<PricingMap> {
@@ -160,60 +200,64 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
     const height = asNumber(rawQuote.height);
     const area = +(length * width).toFixed(2);
     const boardKey = getBoardKey(asString(rawQuote.boardType) || asString(rawQuote.deckingType));
-    const sizeBand = getDeckSizeBand(area);
+    const sizeBand = getSizeBandCode(area, ["under45", "45to65", "over65"]);
+    const labourKey = getDeckLabourKey(boardKey);
 
-    const materialRate = rate(
-      prices,
-      [`deck.mat.${boardKey}.${sizeBand}`, `deck.mat.${boardKey}.under45`, `deck.mat.merbau.${sizeBand}`, "deck.mat.merbau.under45"],
+    addPricedLineItem(prices, items, {
+      section: "Decking",
+      description: "Decking boards (materials)",
+      qty: area,
+      unit: "m2",
+      itemCode: boardKey ? `deck.mat.${boardKey}.${sizeBand}` : undefined,
       warnings,
-      "decking material",
-    );
-    const labourRate = rate(
-      prices,
-      [`deck.labour.carpenter.${boardKey}`, "deck.labour.carpenter.merbau"],
+      missingLabel: `decking material (${asString(rawQuote.boardType) || asString(rawQuote.deckingType) || "unspecified board"})`,
+    });
+    addPricedLineItem(prices, items, {
+      section: "Decking",
+      description: "Carpenter - deck installation",
+      qty: area,
+      unit: "m2",
+      itemCode: labourKey ? `deck.labour.carpenter.${labourKey}` : undefined,
       warnings,
-      "decking labour",
-    );
-
-    items.push(lineItem("Decking", "Decking boards (materials)", area, "m2", materialRate));
-    items.push(lineItem("Decking", "Carpenter - deck installation", area, "m2", labourRate));
+      missingLabel: `decking labour (${asString(rawQuote.boardType) || asString(rawQuote.deckingType) || "unspecified board"})`,
+    });
 
     if (height > 1.2) {
-      items.push(lineItem("Decking", "Height surcharge >1200mm", area, "m2", rate(prices, ["deck.extra.height1200"], warnings, "deck height surcharge")));
+      addPricedLineItem(prices, items, { section: "Decking", description: "Height surcharge >1200mm", qty: area, unit: "m2", itemCode: "deck.extra.height1200", warnings, missingLabel: "deck height surcharge >1200mm" });
     } else if (height > 0.6) {
-      items.push(lineItem("Decking", "Height surcharge >600mm", area, "m2", rate(prices, ["deck.extra.height600"], warnings, "deck height surcharge")));
+      addPricedLineItem(prices, items, { section: "Decking", description: "Height surcharge >600mm", qty: area, unit: "m2", itemCode: "deck.extra.height600", warnings, missingLabel: "deck height surcharge >600mm" });
     }
 
     if (asString(rawQuote.paintingRequired) === "by-ahdp") {
-      items.push(lineItem("Decking", "Painter - oil/stain", area, "m2", rate(prices, ["deck.labour.oilStain"], warnings, "deck oil/stain")));
+      addPricedLineItem(prices, items, { section: "Decking", description: "Painter - oil/stain", qty: area, unit: "m2", itemCode: "deck.labour.oilStain", warnings, missingLabel: "deck oil/stain" });
     }
 
     if (asBoolean(rawQuote.demolitionRequired) && asNumber(rawQuote.existingDeckSize) > 0) {
-      items.push(lineItem("Decking", "Demolition of existing deck", asNumber(rawQuote.existingDeckSize), "m2", rate(prices, ["deck.extra.demo"], warnings, "deck demolition")));
+      addPricedLineItem(prices, items, { section: "Decking", description: "Demolition of existing deck", qty: asNumber(rawQuote.existingDeckSize), unit: "m2", itemCode: "deck.extra.demo", warnings, missingLabel: "deck demolition" });
     }
 
     if (asBoolean(rawQuote.stepRampRequired) && asNumber(rawQuote.stepLength) > 0 && asNumber(rawQuote.stepWidth) > 0) {
       const stepArea = +(asNumber(rawQuote.stepLength) * asNumber(rawQuote.stepWidth)).toFixed(2);
-      items.push(lineItem("Decking", "Steps/Ramp - boxed/tread (carpenter)", stepArea, "m2", rate(prices, ["deck.labour.stairs"], warnings, "deck stairs")));
+      addPricedLineItem(prices, items, { section: "Decking", description: "Steps/Ramp - boxed/tread (carpenter)", qty: stepArea, unit: "m2", itemCode: "deck.labour.stairs", warnings, missingLabel: "deck stairs" });
     }
 
     if (asBoolean(rawQuote.handrailRequired)) {
       const perim = +(2 * (length + width)).toFixed(2);
       const handrailType = asString(rawQuote.handrailType).toLowerCase();
       const code = handrailType.includes("spotted") ? "deck.extra.handrailSpGum" : "deck.extra.handrailMerbau";
-      items.push(lineItem("Decking", `Handrail - ${asString(rawQuote.handrailType) || "Merbau"}`, perim, "LM", rate(prices, [code], warnings, "deck handrail")));
+      addPricedLineItem(prices, items, { section: "Decking", description: `Handrail - ${asString(rawQuote.handrailType) || "Merbau"}`, qty: perim, unit: "LM", itemCode: code, warnings, missingLabel: "deck handrail" });
     }
 
     const balustradeType = asString(rawQuote.ballustradeType);
     if (balustradeType) {
       const perim = +(2 * (length + width)).toFixed(2);
       const code = balustradeType === "Timber" ? "deck.extra.balustTimber" : "deck.extra.balustSS";
-      items.push(lineItem("Decking", `Balustrade - ${balustradeType}`, perim, "LM", rate(prices, [code], warnings, "deck balustrade")));
+      addPricedLineItem(prices, items, { section: "Decking", description: `Balustrade - ${balustradeType}`, qty: perim, unit: "LM", itemCode: code, warnings, missingLabel: `deck balustrade (${balustradeType})` });
     }
 
     if (asBoolean(rawQuote.digOutRequired) && asNumber(rawQuote.digOutSize) > 0) {
-      items.push(lineItem("Decking", "Dingo dig to 300mm", asNumber(rawQuote.digOutSize), "m2", rate(prices, ["deck.extra.dingo"], warnings, "deck dig out")));
-      items.push(lineItem("Decking", "Soil bin (per bin)", 1, "bin", rate(prices, ["deck.extra.soilBin", "extras.skipBin.soil.sm"], warnings, "soil bin")));
+      addPricedLineItem(prices, items, { section: "Decking", description: "Dingo dig to 300mm", qty: asNumber(rawQuote.digOutSize), unit: "m2", itemCode: "deck.extra.dingo", warnings, missingLabel: "deck dig out" });
+      addPricedLineItem(prices, items, { section: "Decking", description: "Soil bin (per bin)", qty: 1, unit: "bin", itemCode: "deck.extra.soilBin", warnings, missingLabel: "soil bin" });
     }
   }
 
@@ -226,28 +270,28 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
       const band = getSteelVerandahBand(area);
       const style = asString(rawQuote.structureStyle).toLowerCase();
       const labourCode = style.includes("gable") ? "ver.steel.labour.gable" : "ver.steel.labour.flat";
-      items.push(lineItem("Verandah", "Steel Sanctuary - materials", area, "m2", rate(prices, [`ver.steel.sanctuary.${band}`], warnings, "steel verandah materials")));
-      items.push(lineItem("Verandah", `Steel Verandah - carpenter (${style.includes("gable") ? "gable" : "flat"})`, area, "m2", rate(prices, [labourCode], warnings, "steel verandah labour")));
+      addPricedLineItem(prices, items, { section: "Verandah", description: "Steel Sanctuary - materials", qty: area, unit: "m2", itemCode: `ver.steel.sanctuary.${band}`, warnings, missingLabel: `steel verandah materials (${band})` });
+      addPricedLineItem(prices, items, { section: "Verandah", description: `Steel Verandah - carpenter (${style.includes("gable") ? "gable" : "flat"})`, qty: area, unit: "m2", itemCode: labourCode, warnings, missingLabel: "steel verandah labour" });
     } else {
-      const rateKey = getTimberVerRate(asString(rawQuote.structureStyle), asString(rawQuote.roofType), roofSpan);
-      const band = getVerandahSizeBand(area);
+      const rateKey = getTimberVerRate(asString(rawQuote.structureStyle), asString(rawQuote.roofType));
+      const band = getSizeBandCode(area, ["under40", "40to65", "over65"]);
       const rating = getTimberCarpenterRating(rateKey);
-      items.push(lineItem("Verandah", `Timber Verandah - ${rateKey} (materials)`, area, "m2", rate(prices, [`ver.timber.${rateKey}.${band}`, `ver.timber.${rateKey}.under40`, "ver.timber.cgiFlatStd.under40"], warnings, "timber verandah materials")));
-      items.push(lineItem("Verandah", `Carpenter Rating ${rating}`, area, "m2", rate(prices, [`ver.labour.carpenter.r${rating}`], warnings, "timber verandah labour")));
+      addPricedLineItem(prices, items, { section: "Verandah", description: `Timber Verandah - ${rateKey} (materials)`, qty: area, unit: "m2", itemCode: `ver.timber.${rateKey}.${band}`, warnings, missingLabel: `timber verandah materials (${rateKey}, ${band})` });
+      addPricedLineItem(prices, items, { section: "Verandah", description: `Carpenter Rating ${rating}`, qty: area, unit: "m2", itemCode: `ver.labour.carpenter.r${rating}`, warnings, missingLabel: `timber verandah labour rating ${rating}` });
 
       if (asString(rawQuote.paintingRequired) === "by-ahdp") {
-        items.push(lineItem("Verandah", "Painter - 2 colours", area, "m2", rate(prices, ["ver.labour.painter.2col"], warnings, "verandah painting")));
+        addPricedLineItem(prices, items, { section: "Verandah", description: "Painter - 2 colours", qty: area, unit: "m2", itemCode: "ver.labour.painter.2col", warnings, missingLabel: "verandah painting" });
       }
 
       const gableInfill = asString(rawQuote.gableInfill);
       if (gableInfill && asString(rawQuote.structureStyle).toLowerCase().includes("gable")) {
         const code = gableInfill === "Slats - Timber" ? "ver.extra.gableInfillSlats" : "ver.extra.gableInfillSolid";
-        items.push(lineItem("Verandah", `Gable infill - ${gableInfill}`, 1, "end", rate(prices, [code], warnings, "gable infill")));
+        addPricedLineItem(prices, items, { section: "Verandah", description: `Gable infill - ${gableInfill}`, qty: 1, unit: "end", itemCode: code, warnings, missingLabel: `gable infill (${gableInfill})` });
       }
     }
 
     if (asBoolean(rawQuote.demolitionRequired) && asNumber(rawQuote.existingDeckSize) > 0) {
-      items.push(lineItem("Verandah", "Demolition (existing structure)", asNumber(rawQuote.existingDeckSize), "m2", rate(prices, ["ver.labour.demo"], warnings, "verandah demolition")));
+      addPricedLineItem(prices, items, { section: "Verandah", description: "Demolition (existing structure)", qty: asNumber(rawQuote.existingDeckSize), unit: "m2", itemCode: "ver.labour.demo", warnings, missingLabel: "verandah demolition" });
     }
 
     const ceilingType = asString(rawQuote.ceilingType);
@@ -257,11 +301,11 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
         : ceilingType.toLowerCase().includes("bulkhead")
           ? "ver.extra.ceiling.bulkhead"
           : "ver.extra.ceiling.flat";
-      items.push(lineItem("Verandah", `Ceiling - ${ceilingType}`, area, "m2", rate(prices, [code], warnings, "verandah ceiling")));
+      addPricedLineItem(prices, items, { section: "Verandah", description: `Ceiling - ${ceilingType}`, qty: area, unit: "m2", itemCode: code, warnings, missingLabel: `verandah ceiling (${ceilingType})` });
     }
 
     if (asBoolean(rawQuote.flashingRequired)) {
-      items.push(lineItem("Verandah", "Flushing (min $500)", Math.max(roofSpan, 10), "m2", rate(prices, ["ver.extra.flushing"], warnings, "verandah flashing")));
+      addPricedLineItem(prices, items, { section: "Verandah", description: "Flushing (min $500)", qty: Math.max(roofSpan, 10), unit: "m2", itemCode: "ver.extra.flushing", warnings, missingLabel: "verandah flashing" });
     }
   }
 
@@ -269,24 +313,16 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
     const bayWidth = parseFloat(asString(rawQuote.postSpacing).replace("mm", "")) / 1000 || 2.4;
     const screenArea = +(asNumber(rawQuote.claddingHeight) * asNumber(rawQuote.numberOfBays) * bayWidth).toFixed(2);
     const material = asString(rawQuote.screenMaterial);
-    const materialCode = material.toLowerCase().includes("pine")
-      ? "screen.mat.treatedPine.single"
-      : material.toLowerCase().includes("fc") || material.toLowerCase().includes("cfc")
-        ? "screen.mat.fc.single"
-        : material.toLowerCase().includes("colorbond")
-          ? "screen.mat.colorbond.single"
-          : material.toLowerCase().includes("aluminium")
-            ? "screen.mat.aluminium.single"
-            : "screen.mat.merbauH.single";
+    const materialCode = getScreenMaterialCode(material);
 
-    items.push(lineItem("Screening", `${material || "Merbau Horizontal"} - single-sided (materials)`, screenArea, "m2", rate(prices, [materialCode], warnings, "screening material")));
-    items.push(lineItem("Screening", "Carpenter/Installer - single-sided screen", screenArea, "m2", rate(prices, ["screen.labour.single"], warnings, "screening labour")));
+    addPricedLineItem(prices, items, { section: "Screening", description: `${material || "Merbau Horizontal"} - single-sided (materials)`, qty: screenArea, unit: "m2", itemCode: materialCode, warnings, missingLabel: `screening material (${material || "Merbau Horizontal"})` });
+    addPricedLineItem(prices, items, { section: "Screening", description: "Carpenter/Installer - single-sided screen", qty: screenArea, unit: "m2", itemCode: "screen.labour.single", warnings, missingLabel: "screening labour" });
 
     if (asString(rawQuote.paintStainRequired) === "by-ahdp") {
       const code = material.toLowerCase().includes("merbau") || material.toLowerCase().includes("pine")
         ? "screen.labour.paint.timber"
         : "screen.labour.paint.fc";
-      items.push(lineItem("Screening", "Painter - screen (per side)", screenArea, "m2", rate(prices, [code], warnings, "screening paint/stain")));
+      addPricedLineItem(prices, items, { section: "Screening", description: "Painter - screen (per side)", qty: screenArea, unit: "m2", itemCode: code, warnings, missingLabel: "screening paint/stain" });
     }
   }
 
@@ -297,32 +333,32 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
     const gpoCount = asNumber(rawQuote.numPowerPoints);
 
     if (fanCount > 0) {
-      items.push(lineItem("Electrical", "Ceiling fan (Bayside Lagoon 132cm)", fanCount, "each", rate(prices, ["elec.fan.baysiLagoon132"], warnings, "ceiling fan supply")));
-      items.push(lineItem("Electrical", "Electrician - fan installation", fanCount, "each", rate(prices, ["elec.fan.labour"], warnings, "ceiling fan installation")));
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Ceiling fan (Bayside Lagoon 132cm)", qty: fanCount, unit: "each", itemCode: "elec.fan.baysiLagoon132", warnings, missingLabel: "ceiling fan supply" });
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - fan installation", qty: fanCount, unit: "each", itemCode: "elec.fan.labour", warnings, missingLabel: "ceiling fan installation" });
     }
     if (lightCount > 0) {
-      items.push(lineItem("Electrical", "Downlight (tri-colour)", lightCount, "each", rate(prices, ["elec.light.downlightTri"], warnings, "downlight supply")));
-      items.push(lineItem("Electrical", "Electrician - light installation", lightCount, "each", rate(prices, ["elec.light.labour"], warnings, "downlight installation")));
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Downlight (tri-colour)", qty: lightCount, unit: "each", itemCode: "elec.light.downlightTri", warnings, missingLabel: "downlight supply" });
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - light installation", qty: lightCount, unit: "each", itemCode: "elec.light.labour", warnings, missingLabel: "downlight installation" });
     }
     if (heaterCount > 0) {
-      items.push(lineItem("Electrical", "2400W Radiant heater", heaterCount, "each", rate(prices, ["elec.heater.2400W"], warnings, "heater supply")));
-      items.push(lineItem("Electrical", "Electrician - heater installation", heaterCount, "each", rate(prices, ["elec.heater.labour"], warnings, "heater installation")));
+      addPricedLineItem(prices, items, { section: "Electrical", description: "2400W Radiant heater", qty: heaterCount, unit: "each", itemCode: "elec.heater.2400W", warnings, missingLabel: "heater supply" });
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - heater installation", qty: heaterCount, unit: "each", itemCode: "elec.heater.labour", warnings, missingLabel: "heater installation" });
     }
     if (gpoCount > 0) {
-      items.push(lineItem("Electrical", "Twin exterior GPO", gpoCount, "each", rate(prices, ["elec.gpo.supply"], warnings, "GPO supply")));
-      items.push(lineItem("Electrical", "Electrician - GPO installation", gpoCount, "each", rate(prices, ["elec.gpo.labour"], warnings, "GPO installation")));
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Twin exterior GPO", qty: gpoCount, unit: "each", itemCode: "elec.gpo.supply", warnings, missingLabel: "GPO supply" });
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - GPO installation", qty: gpoCount, unit: "each", itemCode: "elec.gpo.labour", warnings, missingLabel: "GPO installation" });
     }
     if (asBoolean(rawQuote.deckLights)) {
-      items.push(lineItem("Electrical", "Deck lights (warm white 30mm)", 8, "each", rate(prices, ["elec.deckLight.warmWhite"], warnings, "deck lights supply")));
-      items.push(lineItem("Electrical", "Electrician - deck light install", 8, "each", rate(prices, ["elec.deckLight.labour"], warnings, "deck lights installation")));
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Deck lights (warm white 30mm)", qty: 8, unit: "each", itemCode: "elec.deckLight.warmWhite", warnings, missingLabel: "deck lights supply" });
+      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - deck light install", qty: 8, unit: "each", itemCode: "elec.deckLight.labour", warnings, missingLabel: "deck lights installation" });
     }
   }
 
   if (asBoolean(rawQuote.binHireRequired)) {
-    items.push(lineItem("Extras", "Skip bin hire", 1, "bin", rate(prices, ["extras.skipBin.demo"], warnings, "skip bin hire")));
+    addPricedLineItem(prices, items, { section: "Extras", description: "Skip bin hire", qty: 1, unit: "bin", itemCode: "extras.skipBin.demo", warnings, missingLabel: "skip bin hire" });
   }
   if (asBoolean(rawQuote.councilApproval)) {
-    items.push(lineItem("Extras", "Council approval", 1, "job", rate(prices, ["extras.council"], warnings, "council approval")));
+    addPricedLineItem(prices, items, { section: "Extras", description: "Council approval", qty: 1, unit: "job", itemCode: "extras.council", warnings, missingLabel: "council approval" });
   }
 
   const sectionTotal = (section: string) =>
