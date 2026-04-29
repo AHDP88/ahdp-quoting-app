@@ -392,6 +392,8 @@ export class DatabaseStorage implements IStorage {
 }
 
 const LOCAL_PRICING_ITEMS: InsertPricingItem[] = [
+  { itemCode: "deck.mat.merbau", name: "Merbau decking material", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "Airtable", sellRate: 43000, unit: "m2", mappingStatus: "active", calculationRole: "primary", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
+  { itemCode: "deck.lab.install", name: "Deck installation labour - Standard", category: "Decking", subcategory: "Labour", displayGroup: "Deck Labour", supplier: "AHDP", sellRate: 11000, unit: "m2", mappingStatus: "active", calculationRole: "primary", tier: "Standard", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
   { itemCode: "deck.mat.clearPine.under45", name: "Clear Pine 90mm - Under 45m2", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 38000, unit: "m2", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
   { itemCode: "deck.mat.clearPine.45to65", name: "Clear Pine 90mm - 45-65m2", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 36000, unit: "m2", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
   { itemCode: "deck.mat.clearPine.over65", name: "Clear Pine 90mm - Over 65m2", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 33500, unit: "m2", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },

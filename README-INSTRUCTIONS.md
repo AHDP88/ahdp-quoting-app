@@ -1,13 +1,13 @@
-# Decking Details Fix
+# Airtable-Style Decking Pricing Engine
 
-This package contains only the files changed for the Decking Details pricing and input fixes.
+This package contains only the files changed for the Airtable-style decking pricing engine update.
 
 Replace the matching files in your GitHub Desktop repo folder with these files:
 
 - `server/quoteCalculation.ts`
-- `client/src/components/QuoteBuilder.tsx`
-- `client/src/components/DimensionsForm.tsx`
-- `client/src/lib/dropdownOptions.ts`
+- `shared/schema.ts`
+- `server/settingsRoutes.ts`
+- `server/storage.ts`
 
 After replacing the files, test locally with:
 
@@ -18,7 +18,7 @@ npm run build
 Then commit the changes with this message:
 
 ```text
-Fix decking details pricing and inputs
+Use master pricing engine for decking
 ```
 
 Push the commit to origin when ready.

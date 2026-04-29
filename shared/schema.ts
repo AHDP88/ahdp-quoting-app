@@ -193,6 +193,9 @@ export const pricingItems = pgTable("pricing_items", {
   wasteFactor: integer("waste_factor"), // Waste % as integer (e.g. 10 = 10%)
   unit: text("unit"),                   // m² | LM | each | job | bin
   notes: text("notes"),
+  mappingStatus: text("mapping_status"),
+  calculationRole: text("calculation_role"),
+  tier: text("tier"),
   isActive: boolean("is_active").default(true).notNull(),
   lastUpdatedAt: timestamp("last_updated_at").defaultNow().notNull(),
   updatedBy: text("updated_by"),

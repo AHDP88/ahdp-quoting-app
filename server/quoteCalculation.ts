@@ -25,6 +25,7 @@ export interface QuoteCalculation {
 
 type RawQuoteInput = Record<string, unknown>;
 type PricingMap = Map<string, PricingItem>;
+type PricingRole = "primary" | "conditional" | "excluded";
 
 interface PricedLineInput {
   section: string;
@@ -234,8 +235,141 @@ function addPricedOrWarning(prices: PricingMap, items: LineItem[], input: Priced
   addPricedLineItem(prices, items, input);
 }
 
-async function getPricingMap(): Promise<PricingMap> {
-  const pricing = await storage.getAllPricingItems({ isActive: true });
+function pricingField(item: PricingItem, field: "mappingStatus" | "calculationRole" | "tier"): string {
+  return String((item as PricingItem & Record<string, unknown>)[field] ?? "");
+}
+
+function isActiveAirtablePricingItem(item: PricingItem): boolean {
+  return pricingField(item, "mappingStatus") === "active";
+}
+
+function roleOf(item: PricingItem): PricingRole | "" {
+  const role = pricingField(item, "calculationRole");
+  return role === "primary" || role === "conditional" || role === "excluded" ? role : "";
+}
+
+function unitOf(item: PricingItem): string {
+  return String(item.unit ?? "").toLowerCase().replace("m²", "m2");
+}
+
+function dollars(item: PricingItem): number {
+  return dollarsFromCents(item.sellRate);
+}
+
+function getSelectedDeckMaterialCode(rawQuote: RawQuoteInput): string {
+  const selected = asString(rawQuote.boardType) || asString(rawQuote.deckingType) || asString(rawQuote.materialId);
+  const legacyMap: Record<string, string> = {
+    "Timber-Pine": "deck.mat.clearPine",
+    "Timber-Merbau": "deck.mat.merbau",
+    "Timber-Spotted Gum": "deck.mat.spottedGum",
+    "Timber-Blackbutt": "deck.mat.blackbutt",
+    "Composite-Modwood": "deck.mat.modwood",
+    "Composite-Evalast": "deck.mat.evalast",
+    "FibreCement-HardieDeck": "deck.mat.inex",
+  };
+  return legacyMap[selected] ?? selected;
+}
+
+function getSelectedDeckTier(rawQuote: RawQuoteInput): string {
+  return asString(rawQuote.deckLabourTier) || asString(rawQuote.labourTier) || asString(rawQuote.tier) || "Standard";
+}
+
+function findOneDeckPrimary(items: PricingItem[], predicate: (item: PricingItem) => boolean, label: string): PricingItem {
+  const matches = items.filter((item) => roleOf(item) === "primary" && predicate(item));
+  if (matches.length !== 1) {
+    const message = `Deck pricing error: expected exactly 1 ${label}, found ${matches.length}.`;
+    console.error(message, matches.map((item) => ({ itemCode: item.itemCode, unit: item.unit, tier: pricingField(item, "tier") })));
+    throw new Error(message);
+  }
+  return matches[0];
+}
+
+function findDeckConditional(items: PricingItem[], itemCode: string): PricingItem | undefined {
+  return items.find((item) => roleOf(item) === "conditional" && item.itemCode === itemCode);
+}
+
+function addDeckConditional(items: PricingItem[], lineItems: LineItem[], warnings: string[], input: { itemCode: string; description: string; qty: number; unit: string }) {
+  const item = findDeckConditional(items, input.itemCode);
+  if (!item) {
+    warnings.push(`Missing active conditional decking pricing item: ${input.itemCode}`);
+    return;
+  }
+  lineItems.push(lineItem("Decking", input.description, input.qty, input.unit, item));
+}
+
+function calculateDeckingWithAirtableEngine(deckItems: PricingItem[], rawQuote: RawQuoteInput, warnings: string[]): LineItem[] {
+  const length = asNumber(rawQuote.length);
+  const width = asNumber(rawQuote.width);
+  const area = +(length * width).toFixed(2);
+  if (!asBoolean(rawQuote.deckingRequired) || area <= 0) return [];
+
+  const materialCode = getSelectedDeckMaterialCode(rawQuote);
+  const tier = getSelectedDeckTier(rawQuote);
+  const lineItems: LineItem[] = [];
+
+  const material = findOneDeckPrimary(
+    deckItems,
+    (item) => item.itemCode === materialCode && unitOf(item) === "m2",
+    `primary m2 decking material for ${materialCode}`,
+  );
+  const labour = findOneDeckPrimary(
+    deckItems,
+    (item) => item.itemCode === "deck.lab.install" && pricingField(item, "tier") === tier,
+    `primary deck.lab.install labour row for tier ${tier}`,
+  );
+
+  const materialRate = dollars(material);
+  const labourRate = dollars(labour);
+  lineItems.push({
+    section: "Decking",
+    description: `Decking base - ${material.name} + ${labour.name}`,
+    qty: area,
+    unit: "m2",
+    unitRate: +(materialRate + labourRate).toFixed(2),
+    total: +(area * (materialRate + labourRate)).toFixed(2),
+  });
+
+  const height = asNumber(rawQuote.height);
+  if (height > 1.2) addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.height1200", description: "Height surcharge >1200mm", qty: area, unit: "m2" });
+  else if (height > 0.6) addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.height600", description: "Height surcharge >600mm", qty: area, unit: "m2" });
+
+  if (asBoolean(rawQuote.demolitionRequired) && asNumber(rawQuote.existingDeckSize) > 0) {
+    addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.demo", description: "Demolition of existing deck", qty: asNumber(rawQuote.existingDeckSize), unit: "m2" });
+  }
+
+  if (asBoolean(rawQuote.digOutRequired) && asNumber(rawQuote.digOutSize) > 0) {
+    addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.dingo", description: "Dingo dig to 300mm", qty: asNumber(rawQuote.digOutSize), unit: "m2" });
+  }
+
+  if (asString(rawQuote.machineHireRequired) === "Yes") {
+    addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.machineHire", description: "Machine hire", qty: 1, unit: "job" });
+  }
+
+  if (asBoolean(rawQuote.stepRampRequired) && asNumber(rawQuote.stepLength) > 0 && asNumber(rawQuote.stepWidth) > 0) {
+    const numberOfSteps = Math.max(asNumber(rawQuote.numberOfSteps), 1);
+    const stepArea = +((asNumber(rawQuote.stepWidth) / 1000) * (asNumber(rawQuote.stepLength) / 1000) * numberOfSteps).toFixed(2);
+    if (stepArea > 40) warnings.push("Step dimensions look too large. Enter step width/length in millimetres; step pricing was skipped to prevent an absurd total.");
+    else addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.steps", description: "Steps/Ramp", qty: stepArea, unit: "m2" });
+  }
+
+  if (asString(rawQuote.fixingType)) {
+    const fixingCode = getFixingCode(asString(rawQuote.fixingType));
+    if (fixingCode) addDeckConditional(deckItems, lineItems, warnings, { itemCode: fixingCode, description: `Fixings - ${asString(rawQuote.fixingType)}`, qty: area, unit: "m2" });
+    else warnings.push(`No conditional decking pricing item mapping for fixing type ${asString(rawQuote.fixingType)}`);
+  }
+
+  if (asBoolean(rawQuote.deckLights) && asNumber(rawQuote.deckLightQty) > 0) {
+    addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.deckLight", description: "Deck lights", qty: asNumber(rawQuote.deckLightQty), unit: "each" });
+  }
+
+  return lineItems;
+}
+
+async function getPricingItems(): Promise<PricingItem[]> {
+  return storage.getAllPricingItems({ isActive: true });
+}
+
+function toPricingMap(pricing: PricingItem[]): PricingMap {
   return new Map(
     pricing
       .filter((item) => item.itemCode)
@@ -243,148 +377,19 @@ async function getPricingMap(): Promise<PricingMap> {
   );
 }
 
+async function getPricingMap(): Promise<PricingMap> {
+  const pricing = await storage.getAllPricingItems({ isActive: true });
+  return toPricingMap(pricing);
+}
+
 export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<QuoteCalculation> {
-  const prices = await getPricingMap();
+  const pricingItems = await getPricingItems();
+  const prices = toPricingMap(pricingItems);
+  const deckPricingItems = pricingItems
+    .filter(isActiveAirtablePricingItem)
+    .filter((item) => roleOf(item) !== "excluded");
   const warnings: string[] = [];
-  const items: LineItem[] = [];
-
-  if (asBoolean(rawQuote.deckingRequired) && asNumber(rawQuote.length) > 0 && asNumber(rawQuote.width) > 0) {
-    const length = asNumber(rawQuote.length);
-    const width = asNumber(rawQuote.width);
-    const height = asNumber(rawQuote.height);
-    const area = +(length * width).toFixed(2);
-    const boardType = asString(rawQuote.boardType) || asString(rawQuote.deckingType);
-    const boardSize = asString(rawQuote.boardSize) || asString(rawQuote.customBoardSize);
-    const boardKey = getBoardKey(boardType);
-    const sizeBand = getSizeBandCode(area, ["under45", "45to65", "over65"]);
-    const labourKey = getDeckLabourKey(boardKey);
-    const boardWidthFactor = getBoardWidthFactor(boardSize);
-
-    if (!boardType) warnings.push("Decking board type is required before decking can be priced.");
-    if (!boardSize) warnings.push("Decking board width/size is required before decking can be priced.");
-    if (boardType.includes("Kapur") || boardType.includes("Jarrah")) warnings.push(`No pricing item mapping configured for decking material (${boardType}). Seed a matching pricing_items code before using this board.`);
-    if (boardType.includes("Trex") || boardType.includes("Millboard") || boardType.includes("Ecodeck")) warnings.push(`No pricing item mapping configured for composite decking material (${boardType}). Seed a matching pricing_items code before using this board.`);
-    if (boardType.includes("Aluminium")) warnings.push(`Aluminium decking is not currently priced. Remove it from the quote or seed a pricing_items entry before using ${boardType}.`);
-    if (boardType.includes("HardieDeck") || boardKey === "inex") warnings.push("HardieDeck currently maps to INEX fibre cement pricing. Review this business mapping/rate before relying on it.");
-    if (boardSize && boardWidthFactor === undefined) warnings.push(`No board-width pricing rule configured for board size ${boardSize}.`);
-
-    if (boardType && boardSize && boardKey && boardWidthFactor !== undefined) {
-      addPricedLineItem(prices, items, {
-        section: "Decking",
-        description: `Decking boards (materials, ${boardSize})`,
-        qty: +(area * boardWidthFactor).toFixed(2),
-        unit: "m2",
-        itemCode: `deck.mat.${boardKey}.${sizeBand}`,
-        warnings,
-        missingLabel: `decking material (${boardType})`,
-      });
-      addPricedLineItem(prices, items, {
-        section: "Decking",
-        description: "Carpenter - deck installation",
-        qty: area,
-        unit: "m2",
-        itemCode: labourKey ? `deck.labour.carpenter.${labourKey}` : undefined,
-        warnings,
-        missingLabel: `decking labour (${boardType})`,
-      });
-    }
-
-    if (asString(rawQuote.joistSize)) {
-      addPricedOrWarning(prices, items, { section: "Decking", description: `Joists - ${asString(rawQuote.joistSize)}`, qty: area, unit: "m2", itemCode: `deck.frame.joist.${asString(rawQuote.joistSize)}`, warnings, missingLabel: `joist size ${asString(rawQuote.joistSize)}` });
-    }
-
-    if (asString(rawQuote.bearerSize)) {
-      addPricedOrWarning(prices, items, { section: "Decking", description: `Bearers - ${asString(rawQuote.bearerSize)}`, qty: area, unit: "m2", itemCode: `deck.frame.bearer.${asString(rawQuote.bearerSize)}`, warnings, missingLabel: `bearer size ${asString(rawQuote.bearerSize)}` });
-    }
-
-    if (asString(rawQuote.fixingType)) {
-      addPricedOrWarning(prices, items, { section: "Decking", description: `Fixings - ${asString(rawQuote.fixingType)}`, qty: area, unit: "m2", itemCode: getFixingCode(asString(rawQuote.fixingType)), warnings, missingLabel: `fixing type ${asString(rawQuote.fixingType)}` });
-    }
-
-    if (asString(rawQuote.postInstallation) === "Bolt Down") {
-      const systemType = asString(rawQuote.boltDownSystemType);
-      addPricedOrWarning(prices, items, { section: "Decking", description: `Bolt-down system - ${systemType || "not selected"}`, qty: area, unit: "m2", itemCode: getBoltDownSystemCode(systemType), warnings, missingLabel: `bolt-down system ${systemType || "not selected"}` });
-    }
-
-    if (asBoolean(rawQuote.fasciaRequired)) {
-      const fasciaType = asString(rawQuote.fasciaType);
-      const fasciaLength = asNumber(rawQuote.fasciaLength) > 0 ? asNumber(rawQuote.fasciaLength) : +(2 * (length + width)).toFixed(2);
-      const fasciaArea = +(Math.max(height, 0) * fasciaLength).toFixed(2);
-      if (!fasciaType || fasciaType === "No") {
-        warnings.push("Fascia is marked required but no priced fascia type was selected.");
-      } else if (fasciaArea <= 0) {
-        warnings.push("Fascia pricing requires deck height and fascia length/exposed perimeter.");
-      } else {
-        addPricedOrWarning(prices, items, { section: "Decking", description: `Fascia - ${fasciaType}`, qty: fasciaArea, unit: "m2", itemCode: getFasciaCode(fasciaType), warnings, missingLabel: `fascia type ${fasciaType}` });
-      }
-    }
-
-    if (asBoolean(rawQuote.subframePainted)) {
-      items.push(manualLineItem("Decking", "Subframe painted", area, "m2", 25));
-    }
-
-    if (asBoolean(rawQuote.joistProtectionTape)) {
-      const tapeItem = pricingItem(prices, "deck.extra.joistProtectionTape", [], "joist protection tape");
-      if (tapeItem) {
-        items.push(lineItem("Decking", "Joist protection tape", area, "roll", tapeItem));
-      } else {
-        items.push(manualLineItem("Decking", "Joist protection tape allowance", area, "roll", 55));
-        warnings.push("Using temporary joist protection tape allowance of 1 roll per m2 at $55 because pricing_items code deck.extra.joistProtectionTape is missing.");
-      }
-    }
-
-    if (height > 1.2) {
-      addPricedLineItem(prices, items, { section: "Decking", description: "Height surcharge >1200mm", qty: area, unit: "m2", itemCode: "deck.extra.height1200", warnings, missingLabel: "deck height surcharge >1200mm" });
-    } else if (height > 0.6) {
-      addPricedLineItem(prices, items, { section: "Decking", description: "Height surcharge >600mm", qty: area, unit: "m2", itemCode: "deck.extra.height600", warnings, missingLabel: "deck height surcharge >600mm" });
-    }
-
-    if (asString(rawQuote.paintingRequired) === "by-ahdp") {
-      addPricedLineItem(prices, items, { section: "Decking", description: "Painter - oil/stain", qty: area, unit: "m2", itemCode: "deck.labour.oilStain", warnings, missingLabel: "deck oil/stain" });
-    }
-
-    if (asBoolean(rawQuote.demolitionRequired) && asNumber(rawQuote.existingDeckSize) > 0) {
-      addPricedLineItem(prices, items, { section: "Decking", description: "Demolition of existing deck", qty: asNumber(rawQuote.existingDeckSize), unit: "m2", itemCode: "deck.extra.demo", warnings, missingLabel: "deck demolition" });
-    }
-
-    if (asBoolean(rawQuote.stepRampRequired) && asNumber(rawQuote.stepLength) > 0 && asNumber(rawQuote.stepWidth) > 0) {
-      const numberOfSteps = Math.max(asNumber(rawQuote.numberOfSteps), 1);
-      const stepWidthM = asNumber(rawQuote.stepWidth) / 1000;
-      const stepLengthM = asNumber(rawQuote.stepLength) / 1000;
-      const stepArea = +(stepWidthM * stepLengthM * numberOfSteps).toFixed(2);
-      if (stepArea > 40 || stepWidthM > 5 || stepLengthM > 5) {
-        warnings.push("Step dimensions look too large. Enter step width/length in millimetres; step pricing was skipped to prevent an absurd total.");
-      } else {
-        addPricedLineItem(prices, items, { section: "Decking", description: "Steps/Ramp - boxed/tread (carpenter)", qty: stepArea, unit: "m2", itemCode: "deck.labour.stairs", warnings, missingLabel: "deck stairs" });
-      }
-    }
-
-    if (asBoolean(rawQuote.handrailRequired)) {
-      const linealMetres = asNumber(rawQuote.handrailLinealMetres);
-      const handrailType = asString(rawQuote.handrailType).toLowerCase();
-      const code = handrailType.includes("spotted") ? "deck.extra.handrailSpGum" : "deck.extra.handrailMerbau";
-      if (linealMetres <= 0) {
-        warnings.push("Handrail pricing requires handrail lineal metres. It no longer guesses from deck perimeter.");
-      } else {
-        addPricedLineItem(prices, items, { section: "Decking", description: `Handrail - ${asString(rawQuote.handrailType) || "Merbau"}`, qty: linealMetres, unit: "LM", itemCode: code, warnings, missingLabel: "deck handrail" });
-      }
-    }
-
-    const balustradeType = asString(rawQuote.ballustradeType);
-    if (balustradeType) {
-      const perim = asNumber(rawQuote.handrailLinealMetres);
-      const code = balustradeType === "Timber" ? "deck.extra.balustTimber" : "deck.extra.balustSS";
-      if (perim > 0) addPricedLineItem(prices, items, { section: "Decking", description: `Balustrade - ${balustradeType}`, qty: perim, unit: "LM", itemCode: code, warnings, missingLabel: `deck balustrade (${balustradeType})` });
-    }
-
-    if (asBoolean(rawQuote.digOutRequired) && asNumber(rawQuote.digOutSize) > 0) {
-      addPricedLineItem(prices, items, { section: "Decking", description: "Dingo dig to 300mm", qty: asNumber(rawQuote.digOutSize), unit: "m2", itemCode: "deck.extra.dingo", warnings, missingLabel: "deck dig out" });
-      addPricedLineItem(prices, items, { section: "Decking", description: "Soil bin (per bin)", qty: 1, unit: "bin", itemCode: "deck.extra.soilBin", warnings, missingLabel: "soil bin" });
-    }
-    if (asString(rawQuote.machineHireRequired) === "Yes") {
-      addPricedOrWarning(prices, items, { section: "Decking", description: "Machine hire", qty: 1, unit: "job", itemCode: "deck.extra.machineHire", warnings, missingLabel: "machine hire" });
-    }
-  }
+  const items: LineItem[] = calculateDeckingWithAirtableEngine(deckPricingItems, rawQuote, warnings);
 
   if (asBoolean(rawQuote.verandahRequired) && asNumber(rawQuote.roofSpan) > 0 && asNumber(rawQuote.roofLength) > 0) {
     const roofSpan = asNumber(rawQuote.roofSpan);
@@ -472,16 +477,6 @@ export async function calculateQuoteTotals(rawQuote: RawQuoteInput): Promise<Quo
     if (gpoCount > 0) {
       addPricedLineItem(prices, items, { section: "Electrical", description: "Twin exterior GPO", qty: gpoCount, unit: "each", itemCode: "elec.gpo.supply", warnings, missingLabel: "GPO supply" });
       addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - GPO installation", qty: gpoCount, unit: "each", itemCode: "elec.gpo.labour", warnings, missingLabel: "GPO installation" });
-    }
-  }
-
-  if (asBoolean(rawQuote.deckLights)) {
-    const deckLightQty = asNumber(rawQuote.deckLightQty);
-    if (deckLightQty <= 0) {
-      warnings.push("Deck lights are selected but no deck light quantity was entered.");
-    } else {
-      addPricedLineItem(prices, items, { section: "Electrical", description: "Deck lights (warm white 30mm)", qty: deckLightQty, unit: "each", itemCode: "elec.deckLight.warmWhite", warnings, missingLabel: "deck lights supply" });
-      addPricedLineItem(prices, items, { section: "Electrical", description: "Electrician - deck light install", qty: deckLightQty, unit: "each", itemCode: "elec.deckLight.labour", warnings, missingLabel: "deck lights installation" });
     }
   }
 

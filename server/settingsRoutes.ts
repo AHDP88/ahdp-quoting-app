@@ -6,6 +6,8 @@ import * as XLSX from "xlsx";
 // ── SEED DATA — initial pricing_items catalog defaults ──────
 
 const SEED_ITEMS = [
+  { itemCode: "deck.mat.merbau", name: "Merbau decking material", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "Airtable", sellRate: 43000, unit: "m2", mappingStatus: "active", calculationRole: "primary" },
+  { itemCode: "deck.lab.install", name: "Deck installation labour - Standard", category: "Decking", subcategory: "Labour", displayGroup: "Deck Labour", supplier: "AHDP", sellRate: 11000, unit: "m2", mappingStatus: "active", calculationRole: "primary", tier: "Standard" },
   // === DECKING — MATERIAL RATES (per m²) ===
   { itemCode: "deck.mat.clearPine.under45",     name: "Clear Pine 90mm — Under 45m²",       category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 38000,  unit: "m²" },
   { itemCode: "deck.mat.clearPine.45to65",      name: "Clear Pine 90mm — 45–65m²",          category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 36000,  unit: "m²" },
