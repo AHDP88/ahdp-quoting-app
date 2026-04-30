@@ -260,28 +260,36 @@ function getSelectedDeckMaterialCode(rawQuote: RawQuoteInput): string {
   const selected = asString(rawQuote.boardType) || asString(rawQuote.deckingType) || asString(rawQuote.materialId);
   const legacyMap: Record<string, string> = {
     "Timber-Pine": "deck.mat.clearPine",
+    "Timber-Kapur": "deck.mat.kapur",
     "Timber-Merbau": "deck.mat.merbau",
     "Timber-Spotted Gum": "deck.mat.spottedGum",
+    "Timber-Jarrah": "deck.mat.jarrah",
     "Timber-Blackbutt": "deck.mat.blackbutt",
+    "Composite-Trex": "deck.mat.trex",
     "Composite-Modwood": "deck.mat.modwood",
+    "Composite-Millboard": "deck.mat.millboard",
     "Composite-Evalast": "deck.mat.evalast",
+    "Composite-Ecodeck": "deck.mat.ecodeck",
     "FibreCement-HardieDeck": "deck.mat.inex",
   };
   return legacyMap[selected] ?? selected;
 }
 
-function getSelectedDeckTier(rawQuote: RawQuoteInput): string {
-  return asString(rawQuote.deckLabourTier) || asString(rawQuote.labourTier) || asString(rawQuote.tier) || "Standard";
-}
-
-function findOneDeckPrimary(items: PricingItem[], predicate: (item: PricingItem) => boolean, label: string): PricingItem {
+function findOneDeckPrimary(
+  items: PricingItem[],
+  predicate: (item: PricingItem) => boolean,
+  warnings: string[],
+  missingMessage: string,
+): PricingItem | undefined {
   const matches = items.filter((item) => roleOf(item) === "primary" && predicate(item));
-  if (matches.length !== 1) {
-    const message = `Deck pricing error: expected exactly 1 ${label}, found ${matches.length}.`;
-    console.error(message, matches.map((item) => ({ itemCode: item.itemCode, unit: item.unit, tier: pricingField(item, "tier") })));
-    throw new Error(message);
+  if (matches.length === 1) {
+    return matches[0];
   }
-  return matches[0];
+
+  const message = matches.length > 1 ? "Duplicate primary pricing rows detected" : missingMessage;
+  console.error(message, matches.map((item) => ({ itemCode: item.itemCode, unit: item.unit, tier: pricingField(item, "tier") })));
+  warnings.push(message);
+  return undefined;
 }
 
 function findDeckConditional(items: PricingItem[], itemCode: string): PricingItem | undefined {
@@ -304,19 +312,22 @@ function calculateDeckingWithAirtableEngine(deckItems: PricingItem[], rawQuote: 
   if (!asBoolean(rawQuote.deckingRequired) || area <= 0) return [];
 
   const materialCode = getSelectedDeckMaterialCode(rawQuote);
-  const tier = getSelectedDeckTier(rawQuote);
   const lineItems: LineItem[] = [];
 
   const material = findOneDeckPrimary(
     deckItems,
-    (item) => item.itemCode === materialCode && unitOf(item) === "m2",
-    `primary m2 decking material for ${materialCode}`,
+    (item) => item.itemCode === materialCode && String(item.itemCode).startsWith("deck.mat.") && unitOf(item) === "m2",
+    warnings,
+    "Missing pricing for selected material",
   );
   const labour = findOneDeckPrimary(
     deckItems,
-    (item) => item.itemCode === "deck.lab.install" && pricingField(item, "tier") === tier,
-    `primary deck.lab.install labour row for tier ${tier}`,
+    (item) => item.itemCode === "deck.lab.install" && unitOf(item) === "m2",
+    warnings,
+    "Missing active primary deck.lab.install pricing row",
   );
+
+  if (!material || !labour) return lineItems;
 
   const materialRate = dollars(material);
   const labourRate = dollars(labour);
@@ -328,10 +339,6 @@ function calculateDeckingWithAirtableEngine(deckItems: PricingItem[], rawQuote: 
     unitRate: +(materialRate + labourRate).toFixed(2),
     total: +(area * (materialRate + labourRate)).toFixed(2),
   });
-
-  const height = asNumber(rawQuote.height);
-  if (height > 1.2) addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.height1200", description: "Height surcharge >1200mm", qty: area, unit: "m2" });
-  else if (height > 0.6) addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.height600", description: "Height surcharge >600mm", qty: area, unit: "m2" });
 
   if (asBoolean(rawQuote.demolitionRequired) && asNumber(rawQuote.existingDeckSize) > 0) {
     addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.demo", description: "Demolition of existing deck", qty: asNumber(rawQuote.existingDeckSize), unit: "m2" });

@@ -1,5 +1,6 @@
 import React from "react";
 import { QuoteData } from "./QuoteBuilder";
+import { useQuery } from "@tanstack/react-query";
 
 import { Input } from "@/components/ui/input";
 import { 
@@ -17,11 +18,21 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
   structureTypeOptions,
+  type DeckingMaterialOption,
+  fallbackDeckingMaterialOptions,
   getBoardTypeOptions,
   fixingTypeOptions,
   deckingTypeOptions,
   fasciaRequiredOptions,
 } from "@/lib/dropdownOptions";
+
+interface PricingItem {
+  itemCode?: string | null;
+  name: string;
+  unit?: string | null;
+  mappingStatus?: string | null;
+  calculationRole?: string | null;
+}
 
 interface DimensionsFormProps {
   quoteData: QuoteData;
@@ -30,9 +41,59 @@ interface DimensionsFormProps {
   onBack: () => void;
 }
 
+function normalizedUnit(unit: string | null | undefined) {
+  return String(unit ?? "").toLowerCase().replace("m²", "m2");
+}
+
+function isActivePrimaryDeckingMaterial(item: PricingItem) {
+  return Boolean(
+    item.itemCode?.startsWith("deck.mat.") &&
+    normalizedUnit(item.unit) === "m2" &&
+    item.calculationRole === "primary" &&
+    item.mappingStatus === "active"
+  );
+}
+
+function inferDeckingType(item: PricingItem) {
+  const text = `${item.itemCode ?? ""} ${item.name}`.toLowerCase();
+  if (/(trex|modwood|millboard|evalast|ecodeck|composite)/.test(text)) return "Composite";
+  if (/(inex|hardiedeck|hardie|fibre|fiber|cement)/.test(text)) return "Fibre Cement";
+  return "Timber";
+}
+
+function cleanDeckingLabel(item: PricingItem) {
+  return item.name
+    .replace(/\bdecking\b/gi, "")
+    .replace(/\bmaterial\b/gi, "")
+    .replace(/\s*\/\s*/g, " / ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function toDeckingMaterialOption(item: PricingItem): DeckingMaterialOption | null {
+  if (!item.itemCode) return null;
+  return {
+    value: item.itemCode,
+    label: cleanDeckingLabel(item),
+    deckingType: inferDeckingType(item),
+  };
+}
+
 export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: DimensionsFormProps) {
   const numberValue = (value: number | "") => value === 0 || value === "" ? "" : value;
   const parseOptionalNumber = (value: string) => value === "" ? "" : parseFloat(value);
+  const pricingItemsQuery = useQuery<PricingItem[]>({
+    queryKey: ["/api/settings/pricing", "decking-materials"],
+    queryFn: () => fetch("/api/settings/pricing?active=true&category=Decking").then(r => r.json()),
+  });
+  const pricingDeckingMaterials = (pricingItemsQuery.data ?? [])
+    .filter(isActivePrimaryDeckingMaterial)
+    .map(toDeckingMaterialOption)
+    .filter((option): option is DeckingMaterialOption => option !== null);
+  const deckingMaterialOptions = pricingDeckingMaterials.length > 0
+    ? pricingDeckingMaterials
+    : fallbackDeckingMaterialOptions;
+  const boardTypeOptions = getBoardTypeOptions(quoteData.deckingType, deckingMaterialOptions);
 
   return (
     <div className="space-y-5 ds-reveal">
@@ -229,8 +290,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                     <Select
                       value={quoteData.deckingType}
                       onValueChange={(value) => {
-                        // When selecting decking type, just update the decking type
-                        onUpdate({ deckingType: value });
+                        onUpdate({ deckingType: value, boardType: "" });
                       }}
                     >
                       <SelectTrigger>
@@ -257,8 +317,8 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         <SelectValue placeholder="Select board type" />
                       </SelectTrigger>
                       <SelectContent>
-                        {getBoardTypeOptions(quoteData.deckingType).map((option) => (
-                          <SelectItem key={option} value={option}>{option.split('-')[1]}</SelectItem>
+                        {boardTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

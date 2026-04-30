@@ -391,8 +391,44 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
+const localDeckMaterial = (itemCode: string, name: string, supplier: string, sellRate: number): InsertPricingItem => ({
+  itemCode,
+  name,
+  category: "Decking",
+  subcategory: "Material",
+  displayGroup: "Decking Boards",
+  supplier,
+  sellRate,
+  unit: "m2",
+  mappingStatus: "active",
+  calculationRole: "primary",
+  isActive: true,
+  source: "seed",
+  updatedBy: "system",
+  lastUpdatedAt: new Date(),
+});
+
+const LOCAL_DECK_MATERIAL_ITEMS: InsertPricingItem[] = [
+  localDeckMaterial("deck.mat.clearPine", "Clear Pine decking material", "Airtable", 38000),
+  localDeckMaterial("deck.mat.kapur", "Kapur decking material", "Airtable", 37500),
+  localDeckMaterial("deck.mat.merbau", "Merbau decking material", "Airtable", 43000),
+  localDeckMaterial("deck.mat.spottedGum", "Spotted Gum decking material", "Airtable", 47000),
+  localDeckMaterial("deck.mat.jarrah", "Jarrah decking material", "Airtable", 50000),
+  localDeckMaterial("deck.mat.blackbutt", "Blackbutt decking material", "Airtable", 50000),
+  localDeckMaterial("deck.mat.trex", "Trex decking material", "Airtable", 49000),
+  localDeckMaterial("deck.mat.modwood", "Modwood decking material", "Airtable", 17500),
+  localDeckMaterial("deck.mat.millboard", "Millboard decking material", "Airtable", 49000),
+  localDeckMaterial("deck.mat.evalast", "Evalast decking material", "Airtable", 49000),
+  localDeckMaterial("deck.mat.ecodeck", "Ecodeck decking material", "Airtable", 49000),
+  localDeckMaterial("deck.mat.inex", "INEX / HardieDeck fibre cement decking material", "Airtable", 33000),
+];
+
+const LOCAL_DECK_MATERIAL_ITEM_CODES = new Set(
+  LOCAL_DECK_MATERIAL_ITEMS.map((item) => item.itemCode).filter(Boolean),
+);
+
 const LOCAL_PRICING_ITEMS: InsertPricingItem[] = [
-  { itemCode: "deck.mat.merbau", name: "Merbau decking material", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "Airtable", sellRate: 43000, unit: "m2", mappingStatus: "active", calculationRole: "primary", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
+  ...LOCAL_DECK_MATERIAL_ITEMS,
   { itemCode: "deck.lab.install", name: "Deck installation labour - Standard", category: "Decking", subcategory: "Labour", displayGroup: "Deck Labour", supplier: "AHDP", sellRate: 11000, unit: "m2", mappingStatus: "active", calculationRole: "primary", tier: "Standard", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
   { itemCode: "deck.mat.clearPine.under45", name: "Clear Pine 90mm - Under 45m2", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 38000, unit: "m2", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
   { itemCode: "deck.mat.clearPine.45to65", name: "Clear Pine 90mm - 45-65m2", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 36000, unit: "m2", isActive: true, source: "seed", updatedBy: "system", lastUpdatedAt: new Date() },
@@ -488,7 +524,12 @@ class MemoryStorage implements IStorage {
   private ids = { users: 1, quotes: 1, materials: 1, addons: 1, labourRates: 1, pricingItems: 1, supplierImports: 1, changelog: 1 };
 
   constructor() {
-    for (const item of LOCAL_PRICING_ITEMS) this.createPricingItemSync(item);
+    for (const item of LOCAL_PRICING_ITEMS) {
+      const isLegacyDeckMaterial = item.itemCode?.startsWith("deck.mat.") && !LOCAL_DECK_MATERIAL_ITEM_CODES.has(item.itemCode);
+      this.createPricingItemSync(isLegacyDeckMaterial
+        ? { ...item, isActive: false, mappingStatus: "excluded", calculationRole: "excluded" }
+        : item);
+    }
   }
 
   private createPricingItemSync(item: InsertPricingItem): PricingItem {

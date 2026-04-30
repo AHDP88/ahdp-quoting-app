@@ -271,41 +271,48 @@ export const framTimberTypeOptions = [
   "Hardwood"
 ];
 
+export interface DeckingMaterialOption {
+  value: string;
+  label: string;
+  deckingType: string;
+}
+
+export const fallbackDeckingMaterialOptions: DeckingMaterialOption[] = [
+  { value: "deck.mat.clearPine", label: "Pine", deckingType: "Timber" },
+  { value: "deck.mat.kapur", label: "Kapur", deckingType: "Timber" },
+  { value: "deck.mat.merbau", label: "Merbau", deckingType: "Timber" },
+  { value: "deck.mat.spottedGum", label: "Spotted Gum", deckingType: "Timber" },
+  { value: "deck.mat.jarrah", label: "Jarrah", deckingType: "Timber" },
+  { value: "deck.mat.blackbutt", label: "Blackbutt", deckingType: "Timber" },
+  { value: "deck.mat.trex", label: "Trex", deckingType: "Composite" },
+  { value: "deck.mat.modwood", label: "Modwood", deckingType: "Composite" },
+  { value: "deck.mat.millboard", label: "Millboard", deckingType: "Composite" },
+  { value: "deck.mat.evalast", label: "Evalast", deckingType: "Composite" },
+  { value: "deck.mat.ecodeck", label: "Ecodeck", deckingType: "Composite" },
+  { value: "deck.mat.inex", label: "HardieDeck / INEX", deckingType: "Fibre Cement" },
+];
+
 // Organized by material type
-export const timberBoardTypeOptions = [
-  "Timber-Pine",
-  "Timber-Kapur",
-  "Timber-Merbau",
-  "Timber-Spotted Gum",
-  "Timber-Jarrah",
-  "Timber-Blackbutt"
-];
+export const timberBoardTypeOptions = fallbackDeckingMaterialOptions.filter(option => option.deckingType === "Timber");
 
-export const compositeBoardTypeOptions = [
-  "Composite-Trex",
-  "Composite-Modwood",
-  "Composite-Millboard",
-  "Composite-Evalast",
-  "Composite-Ecodeck"
-];
+export const compositeBoardTypeOptions = fallbackDeckingMaterialOptions.filter(option => option.deckingType === "Composite");
 
-export const otherBoardTypeOptions = [
-  "FibreCement-HardieDeck"
-];
+export const otherBoardTypeOptions = fallbackDeckingMaterialOptions.filter(option => option.deckingType === "Fibre Cement");
 
 // This function returns the appropriate board type options based on decking type
-export const getBoardTypeOptions = (deckingType: string) => {
+export const getBoardTypeOptions = (
+  deckingType: string,
+  options: DeckingMaterialOption[] = fallbackDeckingMaterialOptions,
+) => {
   switch(deckingType) {
     case "Timber":
-      return timberBoardTypeOptions;
+      return options.filter(option => option.deckingType === "Timber");
     case "Composite":
-      return compositeBoardTypeOptions;
+      return options.filter(option => option.deckingType === "Composite");
     case "Fibre Cement":
-      return otherBoardTypeOptions.filter(opt => opt.startsWith("FibreCement"));
-    case "Aluminium":
-      return otherBoardTypeOptions.filter(opt => opt.startsWith("Aluminium"));
+      return options.filter(option => option.deckingType === "Fibre Cement");
     default:
-      return [...timberBoardTypeOptions, ...compositeBoardTypeOptions, ...otherBoardTypeOptions];
+      return options;
   }
 };
 

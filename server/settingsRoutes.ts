@@ -5,8 +5,51 @@ import * as XLSX from "xlsx";
 
 // ── SEED DATA — initial pricing_items catalog defaults ──────
 
+const deckMaterial = (itemCode: string, name: string, supplier: string, sellRate: number) => ({
+  itemCode,
+  name,
+  category: "Decking",
+  subcategory: "Material",
+  displayGroup: "Decking Boards",
+  supplier,
+  sellRate,
+  unit: "m2",
+  mappingStatus: "active",
+  calculationRole: "primary",
+});
+
+const DECK_MATERIAL_ITEM_CODES = new Set([
+  "deck.mat.clearPine",
+  "deck.mat.kapur",
+  "deck.mat.merbau",
+  "deck.mat.spottedGum",
+  "deck.mat.jarrah",
+  "deck.mat.blackbutt",
+  "deck.mat.trex",
+  "deck.mat.modwood",
+  "deck.mat.millboard",
+  "deck.mat.evalast",
+  "deck.mat.ecodeck",
+  "deck.mat.inex",
+]);
+
+const DECK_MATERIAL_ITEMS = [
+  deckMaterial("deck.mat.clearPine", "Clear Pine decking material", "Airtable", 38000),
+  deckMaterial("deck.mat.kapur", "Kapur decking material", "Airtable", 37500),
+  deckMaterial("deck.mat.merbau", "Merbau decking material", "Airtable", 43000),
+  deckMaterial("deck.mat.spottedGum", "Spotted Gum decking material", "Airtable", 47000),
+  deckMaterial("deck.mat.jarrah", "Jarrah decking material", "Airtable", 50000),
+  deckMaterial("deck.mat.blackbutt", "Blackbutt decking material", "Airtable", 50000),
+  deckMaterial("deck.mat.trex", "Trex decking material", "Airtable", 49000),
+  deckMaterial("deck.mat.modwood", "Modwood decking material", "Airtable", 17500),
+  deckMaterial("deck.mat.millboard", "Millboard decking material", "Airtable", 49000),
+  deckMaterial("deck.mat.evalast", "Evalast decking material", "Airtable", 49000),
+  deckMaterial("deck.mat.ecodeck", "Ecodeck decking material", "Airtable", 49000),
+  deckMaterial("deck.mat.inex", "INEX / HardieDeck fibre cement decking material", "Airtable", 33000),
+];
+
 const SEED_ITEMS = [
-  { itemCode: "deck.mat.merbau", name: "Merbau decking material", category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "Airtable", sellRate: 43000, unit: "m2", mappingStatus: "active", calculationRole: "primary" },
+  ...DECK_MATERIAL_ITEMS,
   { itemCode: "deck.lab.install", name: "Deck installation labour - Standard", category: "Decking", subcategory: "Labour", displayGroup: "Deck Labour", supplier: "AHDP", sellRate: 11000, unit: "m2", mappingStatus: "active", calculationRole: "primary", tier: "Standard" },
   // === DECKING — MATERIAL RATES (per m²) ===
   { itemCode: "deck.mat.clearPine.under45",     name: "Clear Pine 90mm — Under 45m²",       category: "Decking", subcategory: "Material", displayGroup: "Decking Boards", supplier: "AHDP", sellRate: 38000,  unit: "m²" },
@@ -278,9 +321,24 @@ export function registerSettingsRoutes(app: Express) {
     try {
       let inserted = 0;
       let skipped = 0;
+      let updated = 0;
       for (const item of SEED_ITEMS) {
         const existing = await storage.getPricingItemByCode(item.itemCode);
-        if (existing) { skipped++; continue; }
+        if (existing) {
+          if (item.itemCode.startsWith("deck.mat.")) {
+            await storage.updatePricingItem(existing.id, {
+              ...item,
+              isActive: true,
+              source: "seed",
+              updatedBy: "system",
+              lastUpdatedAt: new Date(),
+            });
+            updated++;
+          } else {
+            skipped++;
+          }
+          continue;
+        }
         await storage.createPricingItem({
           ...item,
           isActive: true,
@@ -290,7 +348,23 @@ export function registerSettingsRoutes(app: Express) {
         });
         inserted++;
       }
-      res.json({ inserted, skipped, total: SEED_ITEMS.length });
+
+      const allItems = await storage.getAllPricingItems();
+      for (const item of allItems) {
+        if (!item.itemCode?.startsWith("deck.mat.")) continue;
+        if (DECK_MATERIAL_ITEM_CODES.has(item.itemCode)) continue;
+        await storage.updatePricingItem(item.id, {
+          isActive: false,
+          mappingStatus: "excluded",
+          calculationRole: "excluded",
+          source: "seed",
+          updatedBy: "system",
+          lastUpdatedAt: new Date(),
+        });
+        updated++;
+      }
+
+      res.json({ inserted, skipped, updated, total: SEED_ITEMS.length });
     } catch (err) {
       res.status(500).json({ message: "Seed failed" });
     }
