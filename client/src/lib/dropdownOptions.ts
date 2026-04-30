@@ -275,21 +275,23 @@ export interface DeckingMaterialOption {
   value: string;
   label: string;
   deckingType: string;
+  materialCode: string;
+  boardSize: string;
 }
 
 export const fallbackDeckingMaterialOptions: DeckingMaterialOption[] = [
-  { value: "deck.mat.clearPine", label: "Pine", deckingType: "Timber" },
-  { value: "deck.mat.kapur", label: "Kapur", deckingType: "Timber" },
-  { value: "deck.mat.merbau", label: "Merbau", deckingType: "Timber" },
-  { value: "deck.mat.spottedGum", label: "Spotted Gum", deckingType: "Timber" },
-  { value: "deck.mat.jarrah", label: "Jarrah", deckingType: "Timber" },
-  { value: "deck.mat.blackbutt", label: "Blackbutt", deckingType: "Timber" },
-  { value: "deck.mat.trex", label: "Trex", deckingType: "Composite" },
-  { value: "deck.mat.modwood", label: "Modwood", deckingType: "Composite" },
-  { value: "deck.mat.millboard", label: "Millboard", deckingType: "Composite" },
-  { value: "deck.mat.evalast", label: "Evalast", deckingType: "Composite" },
-  { value: "deck.mat.ecodeck", label: "Ecodeck", deckingType: "Composite" },
-  { value: "deck.mat.inex", label: "HardieDeck / INEX", deckingType: "Fibre Cement" },
+  { value: "deck.mat.clearPine", label: "Pine", deckingType: "Timber", materialCode: "deck.mat.clearPine", boardSize: "" },
+  { value: "deck.mat.kapur", label: "Kapur", deckingType: "Timber", materialCode: "deck.mat.kapur", boardSize: "" },
+  { value: "deck.mat.merbau", label: "Merbau", deckingType: "Timber", materialCode: "deck.mat.merbau", boardSize: "" },
+  { value: "deck.mat.spottedGum", label: "Spotted Gum", deckingType: "Timber", materialCode: "deck.mat.spottedGum", boardSize: "" },
+  { value: "deck.mat.jarrah", label: "Jarrah", deckingType: "Timber", materialCode: "deck.mat.jarrah", boardSize: "" },
+  { value: "deck.mat.blackbutt", label: "Blackbutt", deckingType: "Timber", materialCode: "deck.mat.blackbutt", boardSize: "" },
+  { value: "deck.mat.trex", label: "Trex", deckingType: "Composite", materialCode: "deck.mat.trex", boardSize: "" },
+  { value: "deck.mat.modwood", label: "Modwood", deckingType: "Composite", materialCode: "deck.mat.modwood", boardSize: "" },
+  { value: "deck.mat.millboard", label: "Millboard", deckingType: "Composite", materialCode: "deck.mat.millboard", boardSize: "" },
+  { value: "deck.mat.evalast", label: "Evalast", deckingType: "Composite", materialCode: "deck.mat.evalast", boardSize: "" },
+  { value: "deck.mat.ecodeck", label: "Ecodeck", deckingType: "Composite", materialCode: "deck.mat.ecodeck", boardSize: "" },
+  { value: "deck.mat.inex", label: "HardieDeck / INEX", deckingType: "Fibre Cement", materialCode: "deck.mat.inex", boardSize: "" },
 ];
 
 // Organized by material type
@@ -344,9 +346,10 @@ export const deckShapeTypeOptions = [
 ];
 
 export const fixingTypeOptions = [
-  "Face Screwed",
+  "Face Screws",
   "Hidden Fasteners",
-  "Joist Strips",
+  "Klevaklip",
+  "Colour Screws",
   "Other"
 ];
 
@@ -360,11 +363,11 @@ export const fasciaRequiredOptions = [
 ];
 
 export const ballustradeTypeOptions = [
-  "Timber",
-  "Stainless Steel",
+  "Timber Slat",
+  "Stainless Steel Wire",
   "Aluminium Slat",
   "Glass",
-  "Fibre Cement",
+  "FC Sheet",
   "Other"
 ];
 
@@ -372,8 +375,7 @@ export const handrailTypeOptions = [
   "Primed Pine",
   "Merbau",
   "Spotted Gum",
-  "Stainless Steel",
-  "Aluminium",
+  "Blackbutt",
   "Other"
 ];
 

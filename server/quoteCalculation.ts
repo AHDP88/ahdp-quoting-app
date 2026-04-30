@@ -112,17 +112,17 @@ function getBoardWidthFactor(boardSize: string): number | undefined {
 
 function getFixingCode(fixingType: string): string | undefined {
   const normalized = normalizeKey(fixingType);
-  if (normalized.includes("facescrewed") || normalized.includes("facescrew")) return "deck.fixing.faceScrews";
-  if (normalized.includes("hidden")) return "deck.fixing.hiddenFasteners";
-  if (normalized.includes("joiststrip")) return "deck.fixing.joistStrips";
+  if (normalized.includes("facescrewed") || normalized.includes("facescrew")) return "deck.fix.screws.face";
+  if (normalized.includes("hidden")) return "deck.fix.hidden.fasteners";
+  if (normalized.includes("klevaklip")) return "deck.fix.klevaklip";
+  if (normalized.includes("colour") || normalized.includes("color")) return "deck.fix.screws.colour";
   return undefined;
 }
 
-function getBoltDownSystemCode(systemType: string): string | undefined {
-  const normalized = normalizeKey(systemType);
-  if (normalized.includes("lowdeckbracket") || normalized.includes("bracketshoe")) return "deck.post.boltDown.lowDeckBracketShoe";
-  if (normalized.includes("adjustable")) return "deck.post.boltDown.adjustableBootShoe";
-  if (normalized.includes("click") || normalized.includes("aluminium")) return "deck.post.boltDown.lowDeckClickAluminium";
+function getPostInstallCode(postInstallation: string): string | undefined {
+  const normalized = normalizeKey(postInstallation);
+  if (!normalized || normalized.includes("inground") || normalized.includes("concreteinground")) return undefined;
+  if (normalized.includes("onconcrete") || normalized.includes("boltdown")) return "deck.extra.post.install.concrete";
   return undefined;
 }
 
@@ -147,6 +147,33 @@ function getDeckLabourKey(boardKey: string): string {
     inex: "inex",
   };
   return map[boardKey] ?? "";
+}
+
+function getJoistUpgradeCode(joistSize: string): string | undefined {
+  const normalized = normalizeKey(joistSize);
+  if (!normalized || normalized === "90x45") return undefined;
+  if (["120x45", "140x45", "190x45", "240x45"].includes(normalized)) {
+    return `subframe.extra.joist.${normalized}`;
+  }
+  return undefined;
+}
+
+function getHandrailCode(handrailType: string): string | undefined {
+  const normalized = normalizeKey(handrailType);
+  if (normalized.includes("pine")) return "deck.extra.handrail.pine";
+  if (normalized.includes("merbau")) return "deck.extra.handrail.merbau";
+  if (normalized.includes("spottedgum")) return "deck.extra.handrail.spottedgum";
+  if (normalized.includes("blackbutt")) return "deck.extra.handrail.blackbutt";
+  return undefined;
+}
+
+function getBalustradeCode(ballustradeType: string): string | undefined {
+  const normalized = normalizeKey(ballustradeType);
+  if (normalized.includes("timber")) return "deck.extra.balustrade.timberSlat";
+  if (normalized.includes("stainless") || normalized.includes("sswire") || normalized.includes("wire")) return "deck.extra.balustrade.ssWire";
+  if (normalized.includes("aluminium")) return "deck.extra.balustrade.aluminiumSlat";
+  if (normalized.includes("fc") || normalized.includes("fibrecement")) return "deck.extra.balustrade.fcSheet";
+  return undefined;
 }
 
 function getScreenMaterialCode(material: string): string | undefined {
@@ -275,6 +302,24 @@ function getSelectedDeckMaterialCode(rawQuote: RawQuoteInput): string {
   return legacyMap[selected] ?? selected;
 }
 
+function getSelectedDeckBoardSize(rawQuote: RawQuoteInput): string {
+  const selected = asString(rawQuote.boardSize) === "other"
+    ? asString(rawQuote.customBoardSize)
+    : asString(rawQuote.boardSize);
+  return selected.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function getSelectedBuildType(rawQuote: RawQuoteInput): string {
+  const selected = asString(rawQuote.buildType) || "Standard";
+  return ["Budget", "Standard", "Premium"].includes(selected) ? selected : "Standard";
+}
+
+function isDeckMaterialProfileMatch(item: PricingItem, materialCode: string, boardSize: string): boolean {
+  const code = String(item.itemCode ?? "").toLowerCase();
+  const name = String(item.name ?? "").toLowerCase().replace(/\s+/g, "");
+  return code.startsWith(`${materialCode.toLowerCase()}.`) && (code.includes(boardSize) || name.includes(boardSize));
+}
+
 function findOneDeckPrimary(
   items: PricingItem[],
   predicate: (item: PricingItem) => boolean,
@@ -286,10 +331,50 @@ function findOneDeckPrimary(
     return matches[0];
   }
 
-  const message = matches.length > 1 ? "Duplicate primary pricing rows detected" : missingMessage;
+  const message = matches.length > 1
+    ? "More than one matching price was found. Please review the pricing rows before quoting this selection."
+    : missingMessage;
   console.error(message, matches.map((item) => ({ itemCode: item.itemCode, unit: item.unit, tier: pricingField(item, "tier") })));
   warnings.push(message);
   return undefined;
+}
+
+function findDeckMaterial(items: PricingItem[], materialCode: string, boardSize: string, warnings: string[]): PricingItem | undefined {
+  const materialRows = items.filter((item) =>
+    roleOf(item) === "primary" &&
+    String(item.itemCode ?? "").startsWith("deck.mat.") &&
+    unitOf(item) === "m2"
+  );
+  if (!boardSize) {
+    warnings.push("Choose a board size before quoting this decking material.");
+    return undefined;
+  }
+
+  const matches = materialRows.filter((item) => isDeckMaterialProfileMatch(item, materialCode, boardSize));
+
+  if (matches.length === 1) return matches[0];
+
+  const message = matches.length > 1
+    ? "More than one matching deck board price was found. Please review the pricing rows before quoting this selection."
+    : "No price is set up for that decking material and board size. Please choose another size or add the matching pricing row.";
+  console.error(message, { materialCode, boardSize, matches: matches.map((item) => item.itemCode) });
+  warnings.push(message);
+  return undefined;
+}
+
+function findDeckLabour(items: PricingItem[], buildType: string, warnings: string[]): PricingItem | undefined {
+  const tier = buildType.toLowerCase();
+  return findOneDeckPrimary(
+    items,
+    (item) =>
+      unitOf(item) === "m2" &&
+      (
+        (item.itemCode === "deck.lab.install" && (pricingField(item, "tier") || "Standard") === buildType) ||
+        item.itemCode === `deck.lab.install.${tier}`
+      ),
+    warnings,
+    `No ${buildType} deck labour rate is set up yet. Please add the matching deck labour pricing row.`,
+  );
 }
 
 function findDeckConditional(items: PricingItem[], itemCode: string): PricingItem | undefined {
@@ -299,7 +384,7 @@ function findDeckConditional(items: PricingItem[], itemCode: string): PricingIte
 function addDeckConditional(items: PricingItem[], lineItems: LineItem[], warnings: string[], input: { itemCode: string; description: string; qty: number; unit: string }) {
   const item = findDeckConditional(items, input.itemCode);
   if (!item) {
-    warnings.push(`Missing active conditional decking pricing item: ${input.itemCode}`);
+    warnings.push(`No price is set up for ${input.description}. Please add the matching pricing row before quoting this option.`);
     return;
   }
   lineItems.push(lineItem("Decking", input.description, input.qty, input.unit, item));
@@ -309,36 +394,55 @@ function calculateDeckingWithAirtableEngine(deckItems: PricingItem[], rawQuote: 
   const length = asNumber(rawQuote.length);
   const width = asNumber(rawQuote.width);
   const area = +(length * width).toFixed(2);
-  if (!asBoolean(rawQuote.deckingRequired) || area <= 0) return [];
+  if (!asBoolean(rawQuote.deckingRequired)) return [];
 
   const materialCode = getSelectedDeckMaterialCode(rawQuote);
+  const boardSize = getSelectedDeckBoardSize(rawQuote);
+  const buildType = getSelectedBuildType(rawQuote);
   const lineItems: LineItem[] = [];
+  const fasciaRequired = asBoolean(rawQuote.fasciaRequired);
+  const fasciaLength = asNumber(rawQuote.fasciaLength);
+  const deckHeight = asNumber(rawQuote.deckHeight) || asNumber(rawQuote.height);
+  const canCalculateFasciaArea = fasciaLength > 0 && deckHeight > 0;
 
-  const material = findOneDeckPrimary(
-    deckItems,
-    (item) => item.itemCode === materialCode && String(item.itemCode).startsWith("deck.mat.") && unitOf(item) === "m2",
-    warnings,
-    "Missing pricing for selected material",
-  );
-  const labour = findOneDeckPrimary(
-    deckItems,
-    (item) => item.itemCode === "deck.lab.install" && unitOf(item) === "m2",
-    warnings,
-    "Missing active primary deck.lab.install pricing row",
-  );
+  if (fasciaRequired) {
+    if (fasciaLength <= 0) warnings.push("Fascia pricing needs a fascia length in lineal metres.");
+    if (deckHeight <= 0) warnings.push("Fascia pricing needs the deck height in metres.");
+  }
+
+  const material = findDeckMaterial(deckItems, materialCode, boardSize, warnings);
+  const labour = findDeckLabour(deckItems, buildType, warnings);
 
   if (!material || !labour) return lineItems;
 
   const materialRate = dollars(material);
   const labourRate = dollars(labour);
-  lineItems.push({
-    section: "Decking",
-    description: `Decking base - ${material.name} + ${labour.name}`,
-    qty: area,
-    unit: "m2",
-    unitRate: +(materialRate + labourRate).toFixed(2),
-    total: +(area * (materialRate + labourRate)).toFixed(2),
-  });
+  const combinedDeckRate = +(materialRate + labourRate).toFixed(2);
+
+  if (area > 0) {
+    lineItems.push({
+      section: "Decking",
+      description: `Decking base - ${material.name} + ${labour.name}`,
+      qty: area,
+      unit: "m2",
+      unitRate: combinedDeckRate,
+      total: +(area * combinedDeckRate).toFixed(2),
+    });
+  }
+
+  if (fasciaRequired && canCalculateFasciaArea) {
+    const fasciaArea = +(fasciaLength * deckHeight).toFixed(2);
+    lineItems.push({
+      section: "Decking",
+      description: "Fascia",
+      qty: fasciaArea,
+      unit: "m2",
+      unitRate: combinedDeckRate,
+      total: +(fasciaArea * combinedDeckRate).toFixed(2),
+    });
+  }
+
+  if (area <= 0) return lineItems;
 
   if (asBoolean(rawQuote.demolitionRequired) && asNumber(rawQuote.existingDeckSize) > 0) {
     addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.demo", description: "Demolition of existing deck", qty: asNumber(rawQuote.existingDeckSize), unit: "m2" });
@@ -352,17 +456,88 @@ function calculateDeckingWithAirtableEngine(deckItems: PricingItem[], rawQuote: 
     addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.machineHire", description: "Machine hire", qty: 1, unit: "job" });
   }
 
-  if (asBoolean(rawQuote.stepRampRequired) && asNumber(rawQuote.stepLength) > 0 && asNumber(rawQuote.stepWidth) > 0) {
-    const numberOfSteps = Math.max(asNumber(rawQuote.numberOfSteps), 1);
-    const stepArea = +((asNumber(rawQuote.stepWidth) / 1000) * (asNumber(rawQuote.stepLength) / 1000) * numberOfSteps).toFixed(2);
-    if (stepArea > 40) warnings.push("Step dimensions look too large. Enter step width/length in millimetres; step pricing was skipped to prevent an absurd total.");
-    else addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.steps", description: "Steps/Ramp", qty: stepArea, unit: "m2" });
-  }
-
   if (asString(rawQuote.fixingType)) {
     const fixingCode = getFixingCode(asString(rawQuote.fixingType));
     if (fixingCode) addDeckConditional(deckItems, lineItems, warnings, { itemCode: fixingCode, description: `Fixings - ${asString(rawQuote.fixingType)}`, qty: area, unit: "m2" });
     else warnings.push(`No conditional decking pricing item mapping for fixing type ${asString(rawQuote.fixingType)}`);
+  }
+
+  const joistSize = asString(rawQuote.joistSize);
+  const joistUpgradeCode = getJoistUpgradeCode(joistSize);
+  if (joistSize && normalizeKey(joistSize) !== "90x45") {
+    if (joistUpgradeCode) addDeckConditional(deckItems, lineItems, warnings, { itemCode: joistUpgradeCode, description: `Joist upgrade - ${joistSize}`, qty: area, unit: "m2" });
+    else warnings.push(`No conditional decking pricing item mapping for joist size ${joistSize}`);
+  }
+
+  const postInstallation = asString(rawQuote.postInstallation);
+  const postInstallCode = getPostInstallCode(postInstallation);
+  if (postInstallCode) {
+    addDeckConditional(deckItems, lineItems, warnings, { itemCode: postInstallCode, description: "Post install modifier - on concrete", qty: area, unit: "m2" });
+  } else if (postInstallation && !["inground", "concreteinground"].includes(normalizeKey(postInstallation))) {
+    warnings.push(`No conditional decking pricing item mapping for post installation ${postInstallation}`);
+  }
+
+  if (asBoolean(rawQuote.stepRampRequired)) {
+    const stairType = asString(rawQuote.stairType);
+    const normalizedStairType = normalizeKey(stairType);
+
+    if (!stairType) {
+      warnings.push("Choose boxed steps or stringers before pricing stairs.");
+    } else if (normalizedStairType.includes("stringer")) {
+      warnings.push("Stringer stairs need a custom quote and were not auto-priced.");
+    } else if (normalizedStairType.includes("boxed")) {
+      const stepWidth = asNumber(rawQuote.stepWidth);
+      const stepLength = asNumber(rawQuote.stepLength);
+      if (stepWidth <= 0 || stepLength <= 0) {
+        warnings.push("Boxed steps need step width and step length before they can be priced.");
+      } else {
+        const numberOfSteps = Math.max(asNumber(rawQuote.numberOfSteps), 1);
+        const stepArea = +((stepWidth / 1000) * (stepLength / 1000) * numberOfSteps).toFixed(2);
+        if (stepArea > 40) warnings.push("Step dimensions look too large. Enter step width/length in millimetres; step pricing was skipped to prevent an absurd total.");
+        else addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.stairs.boxed", description: "Boxed stairs", qty: stepArea, unit: "m2" });
+      }
+    } else {
+      warnings.push(`No conditional decking pricing item mapping for stair type ${stairType}`);
+    }
+  }
+
+  if (asBoolean(rawQuote.handrailRequired)) {
+    const handrailType = asString(rawQuote.handrailType);
+    const handrailMetres = asNumber(rawQuote.handrailLinealMetres);
+    const handrailCode = getHandrailCode(handrailType);
+
+    if (!handrailType) {
+      warnings.push("Choose a handrail type before pricing handrails.");
+    } else if (handrailMetres <= 0) {
+      warnings.push("Handrails need lineal metres before they can be priced.");
+    } else if (handrailCode) {
+      addDeckConditional(deckItems, lineItems, warnings, { itemCode: handrailCode, description: `Handrail - ${handrailType}`, qty: handrailMetres, unit: "lm" });
+    } else {
+      warnings.push(`No conditional decking pricing item mapping for handrail type ${handrailType}`);
+    }
+
+    const ballustradeType = asString(rawQuote.ballustradeType);
+    if (ballustradeType) {
+      const normalizedBallustradeType = normalizeKey(ballustradeType);
+      if (normalizedBallustradeType.includes("glass")) {
+        warnings.push("Glass balustrade needs a custom quote and was not auto-priced.");
+      } else {
+        const balustradeMetres = asNumber(rawQuote.balustradeLinealMetres);
+        const balustradeCode = getBalustradeCode(ballustradeType);
+
+        if (balustradeMetres <= 0) {
+          warnings.push("Balustrades need lineal metres before they can be priced.");
+        } else if (balustradeCode) {
+          addDeckConditional(deckItems, lineItems, warnings, { itemCode: balustradeCode, description: `Balustrade material - ${ballustradeType}`, qty: balustradeMetres, unit: "lm" });
+          addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.lab.balustrade.install", description: "Balustrade installation", qty: balustradeMetres, unit: "lm" });
+          if (asBoolean(rawQuote.balustradeFinishPainted)) {
+            addDeckConditional(deckItems, lineItems, warnings, { itemCode: "deck.extra.balustrade.finish.paint", description: "Balustrade paint/oil finish", qty: balustradeMetres, unit: "lm" });
+          }
+        } else {
+          warnings.push(`No conditional decking pricing item mapping for balustrade type ${ballustradeType}`);
+        }
+      }
+    }
   }
 
   if (asBoolean(rawQuote.deckLights) && asNumber(rawQuote.deckLightQty) > 0) {

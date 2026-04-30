@@ -19,9 +19,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   structureTypeOptions,
   type DeckingMaterialOption,
-  fallbackDeckingMaterialOptions,
   getBoardTypeOptions,
   fixingTypeOptions,
+  handrailTypeOptions,
+  ballustradeTypeOptions,
   deckingTypeOptions,
   fasciaRequiredOptions,
 } from "@/lib/dropdownOptions";
@@ -29,10 +30,19 @@ import {
 interface PricingItem {
   itemCode?: string | null;
   name: string;
+  sellRate?: number | null;
   unit?: string | null;
+  isActive?: boolean | null;
   mappingStatus?: string | null;
   calculationRole?: string | null;
 }
+
+const BUILD_TYPES = ["Budget", "Standard", "Premium"] as const;
+const REQUIRED_DECK_LABOUR_CODES = [
+  "deck.lab.install.budget",
+  "deck.lab.install",
+  "deck.lab.install.premium",
+];
 
 interface DimensionsFormProps {
   quoteData: QuoteData;
@@ -49,9 +59,24 @@ function isActivePrimaryDeckingMaterial(item: PricingItem) {
   return Boolean(
     item.itemCode?.startsWith("deck.mat.") &&
     normalizedUnit(item.unit) === "m2" &&
+    item.sellRate !== null &&
+    item.sellRate !== undefined &&
+    item.isActive === true &&
     item.calculationRole === "primary" &&
     item.mappingStatus === "active"
   );
+}
+
+function isDeckMaterialCode(itemCode: string | null | undefined) {
+  return Boolean(itemCode?.startsWith("deck.mat."));
+}
+
+function isDeckMaterialBaseCode(itemCode: string | null | undefined) {
+  return Boolean(itemCode?.match(/^deck\.mat\.[^.]+$/i));
+}
+
+function isDeckMaterialProfileCode(itemCode: string | null | undefined) {
+  return Boolean(itemCode?.match(/^deck\.mat\.[^.]+\.\d{2,3}x\d{2,3}$/i));
 }
 
 function inferDeckingType(item: PricingItem) {
@@ -63,6 +88,7 @@ function inferDeckingType(item: PricingItem) {
 
 function cleanDeckingLabel(item: PricingItem) {
   return item.name
+    .replace(/\b\d{2,3}\s*x\s*\d{2,3}\b/gi, "")
     .replace(/\bdecking\b/gi, "")
     .replace(/\bmaterial\b/gi, "")
     .replace(/\s*\/\s*/g, " / ")
@@ -70,12 +96,26 @@ function cleanDeckingLabel(item: PricingItem) {
     .trim();
 }
 
+function extractBoardSize(item: PricingItem) {
+  const text = `${item.itemCode ?? ""} ${item.name}`;
+  const match = text.match(/(\d{2,3})\s*x\s*(\d{2,3})/i);
+  return match ? `${match[1]}x${match[2]}` : "";
+}
+
+function baseDeckMaterialCode(itemCode: string) {
+  const profileMatch = itemCode.match(/^(deck\.mat\.[^.]+)\.\d{2,3}x\d{2,3}$/i);
+  return profileMatch ? profileMatch[1] : itemCode;
+}
+
 function toDeckingMaterialOption(item: PricingItem): DeckingMaterialOption | null {
   if (!item.itemCode) return null;
+  const materialCode = baseDeckMaterialCode(item.itemCode);
   return {
-    value: item.itemCode,
+    value: materialCode,
     label: cleanDeckingLabel(item),
     deckingType: inferDeckingType(item),
+    materialCode,
+    boardSize: extractBoardSize(item),
   };
 }
 
@@ -84,16 +124,65 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
   const parseOptionalNumber = (value: string) => value === "" ? "" : parseFloat(value);
   const pricingItemsQuery = useQuery<PricingItem[]>({
     queryKey: ["/api/settings/pricing", "decking-materials"],
-    queryFn: () => fetch("/api/settings/pricing?active=true&category=Decking").then(r => r.json()),
+    queryFn: () => fetch("/api/settings/pricing?category=Decking").then(r => r.json()),
   });
-  const pricingDeckingMaterials = (pricingItemsQuery.data ?? [])
-    .filter(isActivePrimaryDeckingMaterial)
+
+  const pricingItems = pricingItemsQuery.data ?? [];
+  const deckMaterialRows = pricingItems.filter(item => isDeckMaterialCode(item.itemCode));
+  const materialBaseRows = deckMaterialRows.filter(item => isDeckMaterialBaseCode(item.itemCode));
+  const validDeckProfileRows = deckMaterialRows
+    .filter(item => isDeckMaterialProfileCode(item.itemCode))
+    .filter(isActivePrimaryDeckingMaterial);
+  const invalidDeckProfileRows = deckMaterialRows
+    .filter(item => isDeckMaterialProfileCode(item.itemCode))
+    .filter(item => !isActivePrimaryDeckingMaterial(item));
+  const validMaterialCodes = new Set(validDeckProfileRows.map(item => baseDeckMaterialCode(item.itemCode ?? "")));
+  const materialCodesWithRows = new Set([
+    ...materialBaseRows.map(item => item.itemCode ?? ""),
+    ...deckMaterialRows.filter(item => isDeckMaterialProfileCode(item.itemCode)).map(item => baseDeckMaterialCode(item.itemCode ?? "")),
+  ].filter(Boolean));
+  const materialsWithoutProfileRows = Array.from(materialCodesWithRows).filter(materialCode => !validMaterialCodes.has(materialCode));
+  const missingLabourCodes = REQUIRED_DECK_LABOUR_CODES.filter(code => {
+    const row = pricingItems.find(item => item.itemCode === code);
+    return !row || row.isActive !== true || normalizedUnit(row.unit) !== "m2" || row.mappingStatus !== "active" || row.calculationRole !== "primary" || row.sellRate === null || row.sellRate === undefined;
+  });
+  const hasIncompleteLabourPricing = !pricingItemsQuery.isLoading && missingLabourCodes.length > 0;
+
+  React.useEffect(() => {
+    if (pricingItemsQuery.isLoading || pricingItems.length === 0) return;
+
+    for (const materialCode of materialsWithoutProfileRows) {
+      console.warn(`Decking material hidden because no valid profile rows exist: ${materialCode}`);
+    }
+
+    if (import.meta.env.DEV) {
+      const missingRows = [
+        ...materialsWithoutProfileRows.map(materialCode => `${materialCode}.[boardSize]`),
+        ...invalidDeckProfileRows.map(item => item.itemCode ?? "deck.mat.[unknown]"),
+        ...missingLabourCodes,
+      ];
+      if (missingRows.length > 0) {
+        console.warn(["Missing pricing rows:", ...missingRows.map(code => `- ${code}`)].join("\n"));
+      }
+    }
+  }, [pricingItems, pricingItemsQuery.isLoading, materialsWithoutProfileRows, missingLabourCodes]);
+
+  const pricingDeckingMaterials = validDeckProfileRows
     .map(toDeckingMaterialOption)
     .filter((option): option is DeckingMaterialOption => option !== null);
-  const deckingMaterialOptions = pricingDeckingMaterials.length > 0
-    ? pricingDeckingMaterials
-    : fallbackDeckingMaterialOptions;
-  const boardTypeOptions = getBoardTypeOptions(quoteData.deckingType, deckingMaterialOptions);
+  const deckingMaterialOptions = pricingDeckingMaterials;
+  const boardTypeOptions = getBoardTypeOptions(quoteData.deckingType, deckingMaterialOptions)
+    .filter((option, index, options) => options.findIndex(candidate => candidate.materialCode === option.materialCode) === index);
+  const selectedMaterialProfiles = deckingMaterialOptions.filter(option => option.materialCode === quoteData.boardType);
+  const boardSizeOptions = Array.from(new Set(selectedMaterialProfiles.map(option => option.boardSize).filter(Boolean)));
+  const selectedMaterialHasNoBoardSizes = Boolean(quoteData.boardType && boardSizeOptions.length === 0);
+  const selectedBoardSizeIsValid = !quoteData.boardSize || quoteData.boardSize === "other" || boardSizeOptions.length === 0 || boardSizeOptions.includes(quoteData.boardSize);
+
+  React.useEffect(() => {
+    if (!selectedBoardSizeIsValid) {
+      onUpdate({ boardSize: "", customBoardSize: "" });
+    }
+  }, [selectedBoardSizeIsValid, onUpdate]);
 
   return (
     <div className="space-y-5 ds-reveal">
@@ -123,6 +212,30 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                   <Label htmlFor="deck-pergola">Deck with Pergola/Verandah</Label>
                 </div>
               </RadioGroup>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center pt-2">
+                <label htmlFor="buildType" className="text-sm font-medium text-gray-700">Build Type:</label>
+                <div className="sm:col-span-2">
+                  <Select
+                    value={quoteData.buildType}
+                    onValueChange={(value) => onUpdate({ buildType: value as "Budget" | "Standard" | "Premium" })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select build type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BUILD_TYPES.map((option) => (
+                        <SelectItem key={option} value={option}>{option}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {hasIncompleteLabourPricing && (
+                    <p className="mt-2 text-xs leading-relaxed text-amber-700">
+                      Labour pricing incomplete — Build Type pricing may be incorrect
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -188,7 +301,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                 </div>
                 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
-                  <label htmlFor="height" className="text-sm font-medium text-gray-700">Height (m):</label>
+                  <label htmlFor="height" className="text-sm font-medium text-gray-700">Deck Height (m):</label>
                   <div className="sm:col-span-2">
                     <div className="relative mt-1 rounded-md shadow-sm">
                       <Input
@@ -252,39 +365,6 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                 </div>
                 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
-                  <label htmlFor="boardSize" className="text-sm font-medium text-gray-700">Board Size:</label>
-                  <div className="sm:col-span-2">
-                    <Select
-                      value={quoteData.boardSize}
-                      onValueChange={(value) => onUpdate({ boardSize: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select board size" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="90x19">90x19</SelectItem>
-                        <SelectItem value="90x22">90x22</SelectItem>
-                        <SelectItem value="135x22">135x22</SelectItem>
-                        <SelectItem value="140x22">140x22</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    
-                    {quoteData.boardSize === "other" && (
-                      <div className="mt-2">
-                        <Input
-                          type="text"
-                          id="customBoardSize"
-                          value={quoteData.customBoardSize}
-                          onChange={(e) => onUpdate({ customBoardSize: e.target.value })}
-                          placeholder="Enter custom board size"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
                   <label htmlFor="deckingType" className="text-sm font-medium text-gray-700">Decking Type:</label>
                   <div className="sm:col-span-2">
                     <Select
@@ -302,6 +382,11 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         ))}
                       </SelectContent>
                     </Select>
+                    {quoteData.deckingType && !pricingItemsQuery.isLoading && boardTypeOptions.length === 0 && (
+                      <p className="mt-2 text-xs leading-relaxed text-amber-700">
+                        No active board prices are set up for this decking type yet.
+                      </p>
+                    )}
                   </div>
                 </div>
                 
@@ -310,7 +395,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                   <div className="sm:col-span-2">
                     <Select
                       value={quoteData.boardType}
-                      onValueChange={(value) => onUpdate({ boardType: value })}
+                      onValueChange={(value) => onUpdate({ boardType: value, boardSize: "", customBoardSize: "" })}
                       disabled={!quoteData.deckingType}
                     >
                       <SelectTrigger>
@@ -322,6 +407,44 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                  <label htmlFor="boardSize" className="text-sm font-medium text-gray-700">Board Size:</label>
+                  <div className="sm:col-span-2">
+                    <Select
+                      value={quoteData.boardSize}
+                      onValueChange={(value) => onUpdate({ boardSize: value })}
+                      disabled={!quoteData.boardType}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select board size" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {boardSizeOptions.map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {selectedMaterialHasNoBoardSizes && (
+                      <p className="mt-2 text-xs leading-relaxed text-amber-700">
+                        No board sizes are set up for this decking material yet. Add a matching deck board price before quoting this option.
+                      </p>
+                    )}
+                    
+                    {quoteData.boardSize === "other" && (
+                      <div className="mt-2">
+                        <Input
+                          type="text"
+                          id="customBoardSize"
+                          value={quoteData.customBoardSize}
+                          onChange={(e) => onUpdate({ customBoardSize: e.target.value })}
+                          placeholder="Enter custom board size"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
                 
@@ -410,44 +533,21 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                   <div className="sm:col-span-2">
                     <Select
                       value={quoteData.postInstallation}
-                      onValueChange={(value) => onUpdate({ postInstallation: value, boltDownSystemType: value === "Bolt Down" ? quoteData.boltDownSystemType : "" })}
+                      onValueChange={(value) => onUpdate({ postInstallation: value, boltDownSystemType: "" })}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select post installation" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Bolt Down">Bolt Down</SelectItem>
-                        <SelectItem value="Concrete In Ground">Concrete In Ground</SelectItem>
-                        <SelectItem value="Metal Stirrups">Metal Stirrups</SelectItem>
-                        <SelectItem value="Metal Brackets">Metal Brackets</SelectItem>
+                        <SelectItem value="In ground">In ground</SelectItem>
+                        <SelectItem value="On concrete">On concrete</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-
-                {quoteData.postInstallation === "Bolt Down" && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
-                    <label htmlFor="boltDownSystemType" className="text-sm font-medium text-gray-700">Bolt-down system type:</label>
-                    <div className="sm:col-span-2">
-                      <Select
-                        value={quoteData.boltDownSystemType}
-                        onValueChange={(value) => onUpdate({ boltDownSystemType: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select bolt-down system" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low-deck-bracket-shoe">Low deck bracket/shoe system</SelectItem>
-                          <SelectItem value="adjustable-boot-shoe">Adjustable boot/shoe system</SelectItem>
-                          <SelectItem value="low-deck-click-aluminium">Low deck click aluminium system</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
                 
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="fasciaRequired" className="font-medium">Fascia/Screening Required?</Label>
+                  <Label htmlFor="fasciaRequired" className="font-medium">Fascia Required?</Label>
                   <Switch 
                     id="fasciaRequired" 
                     checked={quoteData.fasciaRequired}
@@ -488,7 +588,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
-                      <label htmlFor="fasciaLength" className="text-sm font-medium text-gray-700">Fascia length (LM):</label>
+                      <label htmlFor="fasciaLength" className="text-sm font-medium text-gray-700">Fascia length (lineal metres):</label>
                       <div className="sm:col-span-2">
                         <Input
                           type="number"
@@ -497,7 +597,7 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                           onChange={(e) => onUpdate({ fasciaLength: parseOptionalNumber(e.target.value) })}
                           step="0.1"
                           min="0"
-                          placeholder="Leave blank to use exposed perimeter"
+                          placeholder="Required for fascia pricing"
                         />
                       </div>
                     </div>
@@ -615,6 +715,24 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                 {quoteData.stepRampRequired && (
                   <div className="grid grid-cols-1 gap-4 pl-4 border-l-2 border-gray-200">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                      <label htmlFor="stairType" className="text-sm font-medium text-gray-700">Stair type:</label>
+                      <div className="sm:col-span-2">
+                        <Select
+                          value={quoteData.stairType}
+                          onValueChange={(value) => onUpdate({ stairType: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select stair type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Boxed steps">Boxed steps</SelectItem>
+                            <SelectItem value="Stringers">Stringers</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
                       <label htmlFor="numberOfSteps" className="text-sm font-medium text-gray-700">Number of Steps:</label>
                       <div className="sm:col-span-2">
                         <Input
@@ -711,12 +829,9 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                             <SelectValue placeholder="Select handrail type" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Primed Pine">Primed Pine</SelectItem>
-                            <SelectItem value="Merbau">Merbau</SelectItem>
-                            <SelectItem value="Spotted Gum">Spotted Gum</SelectItem>
-                            <SelectItem value="Stainless Steel">Stainless Steel</SelectItem>
-                            <SelectItem value="Aluminium">Aluminium</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
+                            {handrailTypeOptions.map((option) => (
+                              <SelectItem key={option} value={option}>{option}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -761,16 +876,42 @@ export default function DimensionsForm({ quoteData, onUpdate, onNext, onBack }: 
                             <SelectValue placeholder="Select balustrade type" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Timber">Timber</SelectItem>
-                            <SelectItem value="Stainless Steel">Stainless Steel</SelectItem>
-                            <SelectItem value="Aluminium Slat">Aluminium Slat</SelectItem>
-                            <SelectItem value="Glass">Glass</SelectItem>
-                            <SelectItem value="Fibre Cement">Fibre Cement</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
+                            {ballustradeTypeOptions.map((option) => (
+                              <SelectItem key={option} value={option}>{option}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
                     </div>
+
+                    {quoteData.ballustradeType && (
+                      <>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6 items-center">
+                          <label htmlFor="balustradeLinealMetres" className="text-sm font-medium text-gray-700">Balustrade lineal metres required:</label>
+                          <div className="sm:col-span-2">
+                            <Input
+                              type="number"
+                              id="balustradeLinealMetres"
+                              value={numberValue(quoteData.balustradeLinealMetres)}
+                              onChange={(e) => onUpdate({ balustradeLinealMetres: parseOptionalNumber(e.target.value) })}
+                              min="0"
+                              step="0.1"
+                            />
+                          </div>
+                        </div>
+
+                        {quoteData.ballustradeType !== "Glass" && (
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="balustradeFinishPainted" className="font-medium">Paint/oil balustrade finish?</Label>
+                            <Switch
+                              id="balustradeFinishPainted"
+                              checked={quoteData.balustradeFinishPainted}
+                              onCheckedChange={(checked) => onUpdate({ balustradeFinishPainted: checked })}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
                 

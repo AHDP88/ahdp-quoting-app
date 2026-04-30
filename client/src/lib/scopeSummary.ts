@@ -1,5 +1,13 @@
 import { QuoteData } from "@/components/QuoteBuilder";
 
+function cleanMaterialLabel(value: string) {
+  return value
+    .replace(/^deck\.mat\./i, "")
+    .replace(/\./g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 /**
  * Generates a professional natural-language scope summary from QuoteData.
  * Used on both the live sidebar and the final quote preview.
@@ -9,7 +17,7 @@ export function buildScopeStatement(q: QuoteData): string {
 
   if (q.deckingRequired && q.length > 0 && q.width > 0) {
     const area = (q.length * q.width).toFixed(1);
-    const board = q.boardType || q.deckingType || "timber";
+    const board = cleanMaterialLabel(q.boardType || q.deckingType || "timber");
     const heightNote =
       q.height > 1.2
         ? ` elevated to ${q.height}m`

@@ -20,6 +20,7 @@ export type StepType = 1 | 2 | 3 | 4 | 5 | 6;
 export interface QuoteData {
   // Basic Info
   projectType: ProjectType;
+  buildType: "Budget" | "Standard" | "Premium";
   
   // ********** Decking Section **********
   deckingRequired: boolean;
@@ -56,6 +57,7 @@ export interface QuoteData {
   
   // Steps/Ramps
   stepRampRequired: boolean;
+  stairType: string;
   numberOfSteps: number;
   stepHeight: number | "";
   stepWidth: number | "";
@@ -66,6 +68,8 @@ export interface QuoteData {
   handrailLinealMetres: number | "";
   handrailHeight: number | "";
   ballustradeType: string;
+  balustradeLinealMetres: number | "";
+  balustradeFinishPainted: boolean;
   
   // Deck Lights and Demo
   deckLights: boolean;
@@ -182,6 +186,7 @@ export default function QuoteBuilder() {
   const [quoteData, setQuoteData] = useState<QuoteData>({
     // Basic Info
     projectType: "deck",
+    buildType: "Standard",
     
     // Decking Section
     deckingRequired: true,
@@ -218,6 +223,7 @@ export default function QuoteBuilder() {
     
     // Steps/Ramps
     stepRampRequired: false,
+    stairType: "",
     numberOfSteps: 0,
     stepHeight: "",
     stepWidth: "",
@@ -228,6 +234,8 @@ export default function QuoteBuilder() {
     handrailLinealMetres: "",
     handrailHeight: "",
     ballustradeType: "",
+    balustradeLinealMetres: "",
+    balustradeFinishPainted: false,
     
     // Deck Lights and Demo
     deckLights: false,
@@ -339,6 +347,7 @@ export default function QuoteBuilder() {
   interface ApiQuoteData {
     // Basic Info
     projectType: ProjectType;
+    buildType: string;
     
     // Decking Section
     deckingRequired: boolean;
@@ -357,6 +366,7 @@ export default function QuoteBuilder() {
     
     // Steps/Ramps
     stepRampRequired: boolean;
+    stairType: string;
     numberOfSteps: number;
     stepHeight: string;
     stepWidth: string;
@@ -367,6 +377,8 @@ export default function QuoteBuilder() {
     handrailLinealMetres: string;
     handrailHeight: string;
     ballustradeType: string;
+    balustradeLinealMetres: string;
+    balustradeFinishPainted: boolean;
     
     // Deck Lights and Demo
     deckLights: boolean;
@@ -551,6 +563,7 @@ export default function QuoteBuilder() {
       stepLength: quoteData.stepLength.toString(),
       handrailLinealMetres: quoteData.handrailLinealMetres.toString(),
       handrailHeight: quoteData.handrailHeight.toString(),
+      balustradeLinealMetres: quoteData.balustradeLinealMetres.toString(),
       deckLightQty: quoteData.deckLightQty.toString(),
       existingDeckSize: quoteData.existingDeckSize.toString(),
       fasciaLength: quoteData.fasciaLength.toString(),

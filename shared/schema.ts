@@ -21,6 +21,7 @@ export const quotes = pgTable("quotes", {
   
   // Basic Info
   projectType: text("project_type").notNull(), // deck, pergola, deck-pergola, carport
+  buildType: text("build_type").default("Standard"),
   
   // ********** Decking Section **********
   deckingRequired: boolean("decking_required"),
@@ -41,6 +42,7 @@ export const quotes = pgTable("quotes", {
   fasciaRequired: boolean("fascia_required"),
   fasciaType: text("fascia_type"),
   fasciaTypeOther: text("fascia_type_other"),
+  fasciaLength: text("fascia_length"),
   
   // Fixing & Ground
   fixingType: text("fixing_type"),
@@ -54,6 +56,7 @@ export const quotes = pgTable("quotes", {
   
   // Steps/Ramps
   stepRampRequired: boolean("step_ramp_required"),
+  stairType: text("stair_type"),
   numberOfSteps: integer("number_of_steps"),
   stepHeight: text("step_height"),
   stepWidth: text("step_width"),
@@ -61,7 +64,11 @@ export const quotes = pgTable("quotes", {
   treadMaterial: text("tread_material"),
   handrailRequired: boolean("handrail_required"),
   handrailType: text("handrail_type"),
+  handrailLinealMetres: text("handrail_lineal_metres"),
+  handrailHeight: text("handrail_height"),
   ballustradeType: text("balustrade_type"),
+  balustradeLinealMetres: text("balustrade_lineal_metres"),
+  balustradeFinishPainted: boolean("balustrade_finish_painted"),
   
   // Deck Lights and Demo
   deckLights: boolean("deck_lights"),

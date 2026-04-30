@@ -2,6 +2,7 @@ import React from "react";
 import { QuoteData } from "@/components/QuoteBuilder";
 import type { QuoteCalculation } from "@/lib/quoteCalculation";
 import { buildScopeStatement } from "@/lib/scopeSummary";
+import { cleanLineItemName, formatQty, groupLineItems, splitWarnings } from "@/lib/quoteOutput";
 import { formatCurrency } from "@/lib/utils";
 import { AlertTriangle, Loader2, Save, ChevronRight } from "lucide-react";
 
@@ -32,6 +33,8 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
   const hasAnyWork = calc.grandTotal > 0;
   const hasPricingWarnings = calc.warnings.length > 0;
   const scopeStatement = buildScopeStatement(quoteData);
+  const groupedLineItems = groupLineItems(calc.lineItems, "summary");
+  const { pricingNeedsAttention, customQuoteItems } = splitWarnings(calc.warnings);
 
   const nextLabel = isLastStep ? "Save Quote" : STEP_NEXT_LABELS[currentStep] ?? "Next Step";
 
@@ -82,8 +85,13 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
       {(quoteData.deckingRequired || quoteData.verandahRequired || quoteData.screeningRequired) && (
         <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/50">
           <div className="space-y-2">
+            <ScopeRow label="Project" value={projectTypeLabel(quoteData.projectType)} color="bg-gray-500" />
+            <ScopeRow label="Build Type" value={quoteData.buildType || "Standard"} color="bg-[#1f3d2b]" />
             {quoteData.deckingRequired && deckArea > 0 && (
               <ScopeRow label="Deck" value={`${quoteData.length}m × ${quoteData.width}m = ${deckArea} m²`} color="bg-[#1f3d2b]" />
+            )}
+            {quoteData.deckingRequired && (quoteData.boardType || quoteData.boardSize) && (
+              <ScopeRow label="Decking" value={[cleanMaterialLabel(quoteData.boardType), quoteData.boardSize].filter(Boolean).join(" · ")} color="bg-[#1f3d2b]" />
             )}
             {quoteData.verandahRequired && verandahArea > 0 && (
               <ScopeRow label={quoteData.structureType || "Verandah"} value={`${quoteData.roofSpan}m × ${quoteData.roofLength}m = ${verandahArea} m²`} color="bg-[#8b5a2b]" />
@@ -106,36 +114,18 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
       {/* ── Cost breakdown ── */}
       {hasAnyWork && (
         <div className="px-5 py-4 border-b border-gray-100">
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Cost Breakdown</p>
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Section Totals</p>
           <div className="space-y-1.5">
-            {calc.deckingSubtotal > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Decking</span>
-                <span className="text-sm font-semibold text-gray-700">{formatCurrency(calc.deckingSubtotal)}</span>
+            {groupedLineItems.map((group) => (
+              <div key={group.key} className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">{group.label}</span>
+                <span className="text-sm font-semibold text-gray-700">{formatCurrency(group.total)}</span>
               </div>
-            )}
-            {calc.verandahSubtotal > 0 && (
+            ))}
+            {customQuoteItems.length > 0 && (
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Verandah / Pergola</span>
-                <span className="text-sm font-semibold text-gray-700">{formatCurrency(calc.verandahSubtotal)}</span>
-              </div>
-            )}
-            {calc.screeningSubtotal > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Screening</span>
-                <span className="text-sm font-semibold text-gray-700">{formatCurrency(calc.screeningSubtotal)}</span>
-              </div>
-            )}
-            {calc.electricalSubtotal > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Electrical</span>
-                <span className="text-sm font-semibold text-gray-700">{formatCurrency(calc.electricalSubtotal)}</span>
-              </div>
-            )}
-            {calc.extrasSubtotal > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">Extras</span>
-                <span className="text-sm font-semibold text-gray-700">{formatCurrency(calc.extrasSubtotal)}</span>
+                <span className="text-sm text-gray-500">Other / POA</span>
+                <span className="text-sm font-semibold text-gray-500">Review needed</span>
               </div>
             )}
             <div className="pt-2 mt-1 border-t border-gray-100 flex items-center justify-between">
@@ -146,14 +136,43 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
         </div>
       )}
 
+      {hasAnyWork && groupedLineItems.length > 0 && (
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Line Items</p>
+          <div className="space-y-4">
+            {groupedLineItems.map((group) => (
+              <div key={group.key}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[11px] font-bold text-[#1f3d2b] uppercase tracking-wider">{group.label}</p>
+                  <p className="text-[11px] font-semibold text-gray-500">{formatCurrency(group.total)}</p>
+                </div>
+                <div className="space-y-2">
+                  {group.items.map((item, index) => (
+                    <div key={`${group.key}-${index}`} className="rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-xs font-semibold text-gray-700 leading-snug">{cleanLineItemName(item.description)}</p>
+                        <p className="text-xs font-bold text-gray-800">{formatCurrency(item.total)}</p>
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        {formatQty(item.qty)} {item.unit} × {formatCurrency(item.unitRate)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {hasPricingWarnings && (
         <div className="px-5 py-4 border-b border-amber-100 bg-amber-50">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="min-w-0">
-              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider mb-1">Pricing Warnings</p>
+              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider mb-1">Pricing Needs Attention</p>
               <ul className="space-y-1">
-                {calc.warnings.map((warning, index) => (
+                {[...pricingNeedsAttention, ...customQuoteItems].map((warning, index) => (
                   <li key={index} className="text-[11px] leading-relaxed text-amber-800">
                     {warning}
                   </li>
@@ -201,4 +220,16 @@ export default function QuoteSummary({ quoteData, onSave, isSaving, isLastStep, 
       </div>
     </div>
   );
+}
+
+function projectTypeLabel(projectType: string) {
+  return projectType.replace(/-/g, " + ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function cleanMaterialLabel(value: string) {
+  return value
+    .replace(/^deck\.mat\./i, "")
+    .replace(/\./g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
